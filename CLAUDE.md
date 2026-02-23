@@ -38,11 +38,7 @@ told you exactly when it started.
 
 ---
 
-This is ___.
-
-Tell claude what this is in the same way web.ts opens:
-not what it does, but what it is.
-The code will know what to do.
+This is a tool for SMEs to find a good assignment in their understanding of the discipline.
 
 ---
 
