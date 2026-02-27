@@ -15,6 +15,8 @@ venv/
 backend/rhizome.db
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 backend/instance/
 
 # Secrets — never commit these

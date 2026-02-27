@@ -1,19 +1,17 @@
 """
-Seed script for proto/course-map development.
+Seed script — creates demo user and MARI 515 with learning outcomes.
 
-Creates a demo user, MARI 515, and its five learning outcomes.
 Run from the backend/ directory:
-
     python seed.py
 """
 
-import sys
 import os
+import sqlite3
+import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app import app
-from models import db, User, Course, LearningOutcome
+from db import DB_PATH, SCHEMA_PATH
 
 OUTCOMES = [
     (0, "Identify the physiological mechanisms underlying coral bleaching and evaluate "
@@ -30,45 +28,65 @@ OUTCOMES = [
         "the tradeoffs made."),
 ]
 
-with app.app_context():
+
+def main():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    with open(SCHEMA_PATH) as f:
+        conn.executescript(f.read())
+
     # Demo user
-    user = User.query.filter_by(canvas_user_id="demo").first()
+    user = conn.execute("SELECT * FROM users WHERE canvas_user_id = 'demo'").fetchone()
     if user is None:
-        user = User(canvas_user_id="demo", name="Demo User", email="demo@localhost")
-        db.session.add(user)
-        db.session.flush()
+        conn.execute(
+            "INSERT INTO users (canvas_user_id, name, email) VALUES ('demo', 'Demo User', 'demo@localhost')"
+        )
+        conn.commit()
+        user = conn.execute("SELECT * FROM users WHERE canvas_user_id = 'demo'").fetchone()
         print("Created demo user.")
     else:
         print("Demo user already exists.")
 
     # MARI 515
-    course = Course.query.filter_by(course_code="MARI 515", user_id=user.id).first()
+    course = conn.execute(
+        "SELECT * FROM courses WHERE course_code = 'MARI 515' AND user_id = ?", (user["id"],)
+    ).fetchone()
+
     if course is None:
-        course = Course(
-            user_id=user.id,
-            course_code="MARI 515",
-            course_title="Coral Ecology and Conservation",
-            canvas_course_id=None,
-            learning_outcomes="\n".join(text for _, text in OUTCOMES),
+        conn.execute(
+            """INSERT INTO courses (user_id, course_code, course_title, learning_outcomes)
+               VALUES (?, 'MARI 515', 'Coral Ecology and Conservation', ?)""",
+            (user["id"], "\n".join(text for _, text in OUTCOMES)),
         )
-        db.session.add(course)
-        db.session.flush()
+        conn.commit()
+        course = conn.execute(
+            "SELECT * FROM courses WHERE course_code = 'MARI 515' AND user_id = ?", (user["id"],)
+        ).fetchone()
         print("Created MARI 515.")
     else:
         print("MARI 515 already exists.")
 
     # Learning outcome rows
-    existing = course.learning_outcome_rows.count()
+    existing = conn.execute(
+        "SELECT COUNT(*) as n FROM learning_outcomes WHERE course_id = ?", (course["id"],)
+    ).fetchone()["n"]
+
     if existing == 0:
         for position, text in OUTCOMES:
-            db.session.add(LearningOutcome(
-                course_id=course.id,
-                text=text,
-                position=position,
-            ))
+            conn.execute(
+                "INSERT INTO learning_outcomes (course_id, text, position) VALUES (?, ?, ?)",
+                (course["id"], text, position),
+            )
+        conn.commit()
         print(f"Seeded {len(OUTCOMES)} learning outcomes.")
     else:
         print(f"Learning outcomes already seeded ({existing} rows).")
 
-    db.session.commit()
+    conn.close()
     print("Done.")
+
+
+if __name__ == "__main__":
+    main()

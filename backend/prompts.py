@@ -31,11 +31,6 @@ When adding new cards:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from models import Course
-
 
 # ── Cards ─────────────────────────────────────────────────────────────────────
 
@@ -155,19 +150,20 @@ DEFAULT_DECK: list[str] = [
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 
-def _render_course_section(course: "Course") -> str:
-    code = (course.course_code or "").strip()
-    title = (course.course_title or "").strip()
-    blob = (course.learning_outcomes or "").strip()
+def _render_course_section(course: dict) -> str:
+    """course: {course_code, course_title, learning_outcomes, learning_outcome_rows}"""
+    code = (course.get("course_code") or "").strip()
+    title = (course.get("course_title") or "").strip()
+    blob = (course.get("learning_outcomes") or "").strip()
 
     lines = ["--- COURSE CONTEXT ---"]
     if code or title:
         lines.append(f"Course: {' — '.join(filter(None, [code, title]))}")
 
-    # Prefer structured rows; fall back to text blob for older courses
-    outcome_rows = list(course.learning_outcome_rows)
+    # Prefer structured rows; fall back to text blob
+    outcome_rows = course.get("learning_outcome_rows") or []
     if outcome_rows:
-        numbered = "\n".join(f"{i + 1}. {lo.text}" for i, lo in enumerate(outcome_rows))
+        numbered = "\n".join(f"{i + 1}. {lo['text']}" for i, lo in enumerate(outcome_rows))
         lines.append(f"Learning outcomes:\n{numbered}")
     elif blob:
         lines.append(f"Learning outcomes:\n{blob}")
@@ -180,51 +176,48 @@ def _render_course_section(course: "Course") -> str:
     return "\n".join(lines)
 
 
-def _render_bearings_section(course: "Course") -> str | None:
+def _render_bearings_section(course: dict) -> str | None:
     """Render bearing state for injection into the system prompt.
 
     Returns None if the course has no bearings — the card stays out of the hand.
+    course: {bearings: [{text, weight, likelihood, statements: [{text, observed}]}]}
     """
-    bearings = list(course.bearings)
+    bearings = course.get("bearings") or []
     if not bearings:
         return None
 
     lines = []
     for b in bearings:
-        direction = "toward" if b.weight >= 0 else "away from"
-        intensity = abs(b.weight)
-        # Only show likelihood if it's been updated from the default
-        if b.likelihood != 0.5:
-            lines.append(f"- {b.text} (sailing {direction}, intensity {intensity:.1f}, current read: {b.likelihood:.1f})")
+        direction = "toward" if b["weight"] >= 0 else "away from"
+        intensity = abs(b["weight"])
+        if b["likelihood"] != 0.5:
+            lines.append(f"- {b['text']} (sailing {direction}, intensity {intensity:.1f}, current read: {b['likelihood']:.1f})")
         else:
-            lines.append(f"- {b.text} (sailing {direction}, intensity {intensity:.1f})")
+            lines.append(f"- {b['text']} (sailing {direction}, intensity {intensity:.1f})")
 
-        # Include observed statements as context
-        for s in b.statements:
-            if s.observed is True:
-                lines.append(f"  ✓ observed: {s.text}")
-            elif s.observed is False:
-                lines.append(f"  ✗ not observed: {s.text}")
-            # null (not yet evaluated) statements are omitted — they're the designer's
-            # private notes about what to look for, not context for the conversation
+        for s in (b.get("statements") or []):
+            if s["observed"] is True:
+                lines.append(f"  ✓ observed: {s['text']}")
+            elif s["observed"] is False:
+                lines.append(f"  ✗ not observed: {s['text']}")
+            # null = not yet evaluated; omitted — designer's private notes
 
     return "\n".join(lines)
 
 
 def build_system_prompt(
-    course: "Course | None" = None,
+    course: dict | None = None,
     deck: list[str] = DEFAULT_DECK,
 ) -> str:
     parts = [CARDS[card] for card in deck if card != "bearings"]
 
     if course:
-        code = (course.course_code or "").strip()
-        title = (course.course_title or "").strip()
-        outcomes = (course.learning_outcomes or "").strip()
+        code = (course.get("course_code") or "").strip()
+        title = (course.get("course_title") or "").strip()
+        outcomes = (course.get("learning_outcomes") or "").strip()
         if any([code, title, outcomes]):
             parts.append(_render_course_section(course))
 
-        # Inject bearings card if the course has any
         bearings_text = _render_bearings_section(course)
         if bearings_text:
             parts.append(CARDS["bearings"].format(bearings_text=bearings_text))
