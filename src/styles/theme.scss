@@ -1,0 +1,33 @@
+// SME Rhizome Builder — visual language from ALIGN / UNA
+// Worksheet metaphor: not a chatbot, a working document.
+
+// --- Colour palette ---
+$una-gold:        #F7A700;
+$una-dark-1:      #0B1C00;
+$una-dark-2:      #1A3300;
+$una-mid-green:   #2D5016;
+$una-light-green: #E0EBD9;
+$color-bg-paper:  #F0F5EC;
+$color-bg-body:   #D8E8D0;
+$color-text:      $una-dark-1;
+$color-border:    #B8D4A8;
+
+// --- Typography ---
+$font-serif: 'Georgia', 'Garamond', 'Times New Roman', serif;
+$font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+$font-mono:  'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+
+// --- Spacing ---
+$space-xs:  4px;
+$space-sm:  8px;
+$space-md:  16px;
+$space-lg:  24px;
+$space-xl:  40px;
+
+// --- Layout ---
+$drawer-width: 420px;
+$border-top:   4px solid $una-gold;
+
+// --- Shadows ---
+$shadow-paper: 0 2px 8px rgba($una-dark-1, 0.12);
+

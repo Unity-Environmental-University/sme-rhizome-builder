@@ -1,0 +1,28 @@
+node_modules/
+.svelte-check.log
+.drafts/
+dist/
+.svelte-kit/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+*.egg-info/
+
+# DB
+backend/rhizome.db
+*.db
+*.db-journal
+backend/instance/
+
+# Secrets — never commit these
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+
+# Stray files
+=*

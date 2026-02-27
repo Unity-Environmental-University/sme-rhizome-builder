@@ -1,0 +1,11 @@
+@use 'theme' as *;
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: $color-bg-body;
+  font-family: $font-sans;
+  color: $color-text;
+  min-height: 100vh;
+}

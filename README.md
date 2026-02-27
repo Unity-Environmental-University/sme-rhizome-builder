@@ -8,6 +8,8 @@ but doesn't know its shape yet.
 
 ---
 
+// HL: Can we replace this with a description of what the project is? Is it worth it? This is not project seed anymore right
+//
 ## what's here
 
 A CLAUDE.md that orients Claude as a collaborator —
