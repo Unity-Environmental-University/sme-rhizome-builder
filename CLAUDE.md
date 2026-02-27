@@ -85,9 +85,10 @@ another, it probably isn't the move.
 ## What this is (technical)
 
 A Svelte + TypeScript + Flask tool that helps subject matter experts at Unity Environmental
-University discover and shape Canvas assignments through Socratic conversation.
+University discover and shape Canvas assignments. The course map is the primary surface.
+The AI is in the margin of a live document, not running a freeform interview.
 
-The conversation is the substrate. The assignment is a crystallization.
+The assignment is the artifact. The conversation is how it gets made.
 
 ## Running
 
@@ -97,88 +98,50 @@ pip install -r backend/requirements.txt
 npm run dev:full           # Vite (:5173) + Flask (:5050)
 ```
 
-Set your Anthropic API key in the Settings drawer (⚙ top right) — or via `ANTHROPIC_API_KEY` env.
-Canvas credentials (token, base URL, course ID) also live in Settings.
+Admin dashboard (localhost only): `http://localhost:5050/admin` — set API keys, Canvas credentials.
 
 ## Stack
 
-- **Frontend**: Svelte 4, TypeScript, Vite 5, SCSS (ALIGN/UNA visual language)
-- **Backend**: Flask, Anthropic SDK (`claude-sonnet-4-6`)
-- **State**: localStorage — conversation persists per course code, survives refresh
+- **Frontend**: Svelte 4, TypeScript, Vite 5, SCSS
+- **Backend**: Flask, raw sqlite3 (no ORM), Anthropic SDK
+- **Auth**: Canvas OAuth or demo mode (JWT httpOnly cookie)
+- **State**: DB-backed. localStorage only for API/endpoint settings.
 
 ## Key files
 
 | File | What it does |
 |------|--------------|
-| `src/stores/session.ts` | Conversation + assignment, persisted per course to localStorage |
-| `src/stores/courseContext.ts` | Course code, title, learning outcomes |
-| `src/stores/settings.ts` | API keys |
-| `src/components/WorksheetFrame.svelte` | The Socratic UI |
-| `src/components/AssignmentDrawer.svelte` | Right panel: rubric + Canvas export |
-| `src/components/SettingsDrawer.svelte` | Left panel: course context + keys |
-| `backend/app.py` | Flask: `/api/chat` and `/api/canvas/assignment` |
+| `src/components/CourseMap.svelte` | Primary surface — course timeline, module nav, editor entry |
+| `src/components/AssignmentEditor.svelte` | TipTap WYSIWYG for assignment body |
+| `src/components/LoginScreen.svelte` | Auth gate — Canvas OAuth or demo |
+| `src/stores/auth.ts` | `user` writable + `loadUser()` + `logout()` |
+| `src/stores/settings.ts` | AI endpoint, model, API key — localStorage |
+| `backend/schema.sql` | Authoritative DB schema |
+| `backend/db.py` | sqlite3 connection (request-scoped via Flask g) |
+| `backend/queries.py` | All SQL as named parameterized functions |
+| `backend/app.py` | Flask routes — thin, delegates to queries.py |
+| `backend/prompts.py` | Prompt card deck — CARDS + build_system_prompt(course_dict) |
+| `backend/seed.py` | Demo user + MARI 515 seed data |
+| `backend/admin.py` | Localhost-only settings dashboard |
 
-## Data flow
+## Data model
 
-```
-courseContext + settings + conversation
-        ↓ POST /api/chat
-backend builds system prompt with course outcomes injected
-        ↓ Claude
-reply + optional <assignment>JSON</assignment>
-        ↓
-session store (persisted) + AssignmentDrawer opens
-        ↓ POST /api/canvas/assignment
-Canvas REST API → published: false (always draft first)
-```
+Session is not a table. A session is reconstructible from timestamps when needed.
 
-## Assignment shape
-
-```typescript
-type AssignmentDraft = {
-  title: string;
-  description: string;           // student-facing, markdown ok
-  learning_outcomes: string[];   // what this assignment demonstrates
-  aligned_outcomes: string[];    // which course outcomes it addresses
-  points_possible: number;       // almost always 100
-  submission_types: string[];
-  rubric: {
-    criterion: string;
-    long_description: string;
-    points: number;
-    ratings: { description: string; points: number }[];  // Excellent/Proficient/Developing/Beginning
-  }[];
-}
-```
-
-Unity rubric conventions: ratings-based criteria, 100 pts total,
-always includes a Citations criterion (~10–15 pts).
-
-## What we learned about the conversation shape
-
-The tool should speak first. The SME shouldn't open into silence.
-Opening question: "What's something about your discipline that's hard to describe to someone not in it?"
-Second door: "Is there a word from your discipline that people need to understand differently once they're inside it?"
-
-The right entry point is probably the learning outcome, not the assignment.
-SMEs come with a syllabus. The outcomes are already defined.
-The conversation is: "here's an outcome — what does it actually look like in your discipline?"
-Not: "what do you want to teach?"
-
-"Algorithmic system" is too narrow for ML 101. Let the examples do the work:
-pets, recommendation engines, gardens, institutions, ecosystems.
-The student picks their own door. The concepts travel through whatever they chose.
-
-The pedagogical vocabulary has to stay legible (Bloom's-adjacent, recognizable criteria names)
-but the language inside can point at the real thing. The squiffy feeling in a tie.
+- **Assignment** belongs to user + course directly. The primary artifact.
+- **Message** attaches to a context: `context_type` ('assignment'|'course'|'thread') + `context_id`.
+  The chat interface is an implementation detail. The log is the record.
+- **Bearing** is the learning designer's compass — weight (-1→1) + likelihood (0→1).
+  Stars, not destinations. Course-level or outcome-level.
+- **BearingStatement** is the evidence layer. The LLM evaluation loop isn't built yet.
 
 ## What wants to grow next
 
-- `assignments: AssignmentDraft[]` (list, not single) — one conversation, many crystallizations
-- `id` and `module` on AssignmentDraft — enables course-level coverage view
-- Session export (JSON download) — GRAD bridge, otter bridge, paper trail
-- `GET /api/canvas/assignments` — pull existing Canvas assignments into the tool
-- Multi-assignment view — see outcome coverage across a whole course
+- AI as margin comments: threaded, anchored to passages in the assignment body
+- Bearing UI: learning designers need a surface to set/read navigational state
+- BearingStatement evaluation loop: LLM reads a message window each turn, updates likelihood
+- Version tracking: assignment edit history, not just the current state
+- Session export: assignment + its full message log → GRAD, otter-centaur, paper trail
 
 ## Related projects
 
