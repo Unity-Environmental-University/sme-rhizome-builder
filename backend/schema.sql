@@ -61,24 +61,26 @@ CREATE TABLE IF NOT EXISTS assignments (
     created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
--- Messages attach to any context — an assignment, a course, or a free thread.
--- context_type: 'assignment' | 'course' | 'thread'
--- context_id:   the id of that thing (TEXT to accommodate uuid assignments)
--- role:         'user' | 'assistant'
--- The chat interface is an implementation detail. The log is the record.
-CREATE TABLE IF NOT EXISTS messages (
+-- The log. Every action is an entry.
+-- context_type: 'assignment' | 'course' | 'thread' — open-ended, not an enum
+-- context_id:   id of that thing (TEXT to accommodate uuid assignments)
+-- action_type:  'ai_turn' | 'comment' | 'edit' | 'save' | 'created' | ...
+--               action_type tells you how to read content. Don't over-specify.
+-- content:      text — JSON-as-text when the action warrants it
+-- replied_to:   self-referential — threads are linked lists, not containers
+CREATE TABLE IF NOT EXISTS log_entries (
     id           INTEGER PRIMARY KEY,
     user_id      INTEGER NOT NULL REFERENCES users(id),
     context_type TEXT    NOT NULL,
     context_id   TEXT    NOT NULL,
-    role         TEXT    NOT NULL,
-    content      TEXT    NOT NULL,
-    position     INTEGER NOT NULL DEFAULT 0,
+    action_type  TEXT    NOT NULL,
+    content      TEXT    NOT NULL DEFAULT '',
+    replied_to   INTEGER REFERENCES log_entries(id),
     created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_context
-    ON messages (context_type, context_id, position);
+CREATE INDEX IF NOT EXISTS idx_log_context
+    ON log_entries (context_type, context_id, created_at);
 
 -- Bearings: the learning designer's compass.
 -- Stars, not destinations. course-level or outcome-level.

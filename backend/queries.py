@@ -247,44 +247,37 @@ def update_assignment(
     return get_assignment(conn, assignment_id, user_id)
 
 
-# ── Messages ──────────────────────────────────────────────────────────────────
+# ── Log entries ───────────────────────────────────────────────────────────────
 
-def list_messages(
+def list_log(
     conn: sqlite3.Connection, context_type: str, context_id: str
 ) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT * FROM messages WHERE context_type = ? AND context_id = ? ORDER BY position",
+        "SELECT * FROM log_entries WHERE context_type = ? AND context_id = ? ORDER BY created_at",
         (context_type, context_id),
     ).fetchall()
 
 
-def next_message_position(
-    conn: sqlite3.Connection, context_type: str, context_id: str
-) -> int:
-    row = conn.execute(
-        "SELECT MAX(position) as max_pos FROM messages WHERE context_type = ? AND context_id = ?",
-        (context_type, context_id),
-    ).fetchone()
-    max_pos = row["max_pos"]
-    return (max_pos + 1) if max_pos is not None else 0
-
-
-def append_message(
+def append_log(
     conn: sqlite3.Connection,
     user_id: int,
     context_type: str,
     context_id: str,
-    role: str,
-    content: str,
+    action_type: str,
+    content: str = "",
+    replied_to: Optional[int] = None,
 ) -> sqlite3.Row:
-    pos = next_message_position(conn, context_type, context_id)
     cur = conn.execute(
-        """INSERT INTO messages (user_id, context_type, context_id, role, content, position)
+        """INSERT INTO log_entries (user_id, context_type, context_id, action_type, content, replied_to)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        (user_id, context_type, context_id, role, content, pos),
+        (user_id, context_type, context_id, action_type, content, replied_to),
     )
     conn.commit()
-    return conn.execute("SELECT * FROM messages WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return conn.execute("SELECT * FROM log_entries WHERE id = ?", (cur.lastrowid,)).fetchone()
+
+
+def get_log_entry(conn: sqlite3.Connection, entry_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM log_entries WHERE id = ?", (entry_id,)).fetchone()
 
 
 # ── Bearings ──────────────────────────────────────────────────────────────────

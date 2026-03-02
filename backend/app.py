@@ -545,12 +545,14 @@ def chat():
 
     assignment_data, reply = _extract_assignment(full_text)
 
-    # Persist messages if we have a context
+    # Persist to log if we have a context
     if context_type and context_id:
         user_msg_content = messages[-1]["content"] if messages[-1]["role"] == "user" else None
+        user_entry = None
         if user_msg_content:
-            q.append_message(conn, user_id, context_type, context_id, "user", user_msg_content)
-        q.append_message(conn, user_id, context_type, context_id, "assistant", reply)
+            user_entry = q.append_log(conn, user_id, context_type, context_id, "ai_turn", user_msg_content)
+        q.append_log(conn, user_id, context_type, context_id, "ai_turn", reply,
+                     replied_to=user_entry["id"] if user_entry else None)
 
     # Persist crystallized assignment if we have a course
     if assignment_data and course_id:
