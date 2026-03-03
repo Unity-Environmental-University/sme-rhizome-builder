@@ -128,24 +128,25 @@ def _course_dict(course, outcome_rows) -> dict:
     }
 
 
-def _assignment_dict(a) -> dict:
-    def _j(val):
-        return json.loads(val) if isinstance(val, str) else (val or [])
-
-    return {
+def _assignment_dict(a, snapshot=None) -> dict:
+    """Identity record + optional latest snapshot content for convenience."""
+    out = {
         "id": a["id"],
         "module": a["module_label"],
         "title": a["title"],
-        "description": a["description"],
-        "learning_outcomes": _j(a["learning_outcomes"]),
-        "aligned_outcomes": _j(a["aligned_outcomes"]),
-        "points_possible": a["points_possible"],
-        "submission_types": _j(a["submission_types"]),
-        "rubric": _j(a["rubric"]),
         "position": a["position"],
-        "canvas_assignment_id": a["canvas_assignment_id"],
-        "canvas_html_url": a["canvas_html_url"],
+        "createdAt": a["created_at"],
+        "snapshot": None,
     }
+    if snapshot:
+        content = json.loads(snapshot["content"]) if isinstance(snapshot["content"], str) else snapshot["content"]
+        out["snapshot"] = {
+            "id": snapshot["id"],
+            "label": snapshot["label"],
+            "snapshotAt": snapshot["snapshot_at"],
+            **content,
+        }
+    return out
 
 
 def _bearing_dict(b, statements) -> dict:
@@ -401,13 +402,17 @@ def list_assignments():
         return jsonify({"error": "not found"}), 404
 
     assignments = q.list_assignments(conn, course_id, user_id)
-    return jsonify({"assignments": [_assignment_dict(a) for a in assignments]})
+    result = []
+    for a in assignments:
+        snap = q.latest_snapshot(conn, a["id"])
+        result.append(_assignment_dict(a, snap))
+    return jsonify({"assignments": result})
 
 
 @app.post("/api/assignments")
 @jwt_required()
 def create_assignment():
-    """Create an assignment from the editor. No conversation required."""
+    """Create an assignment identity record. The live document starts empty in the log."""
     conn = get_db()
     user_id = int(get_jwt_identity())
     body = request.get_json(force=True)
@@ -420,34 +425,22 @@ def create_assignment():
     if not course:
         return jsonify({"error": "not found"}), 404
 
-    # Resolve outcome IDs → text
-    outcome_ids = body.get("aligned_outcome_ids", [])
-    aligned_texts = []
-    if outcome_ids:
-        rows = q.get_learning_outcomes_by_ids(conn, outcome_ids, course["id"])
-        aligned_texts = [lo["text"] for lo in rows]
-
     module_label = body.get("module_label", "")
     position = q.next_position_in_module(conn, course["id"], user_id, module_label)
+    title = body.get("title") or "Untitled"
 
-    a = q.create_assignment(
-        conn,
-        user_id=user_id,
-        course_id=course["id"],
-        module_label=module_label,
-        title=body.get("title") or "Untitled",
-        description=body.get("description", ""),
-        aligned_outcomes=aligned_texts,
-        submission_types=["online_text_entry"],
-        position=position,
-    )
+    a = q.create_assignment(conn, user_id, course["id"], module_label, title, position)
+
+    # Log the creation
+    q.append_log(conn, user_id, "assignment", a["id"], "created", title)
+
     return jsonify(_assignment_dict(a)), 201
 
 
 @app.patch("/api/assignments/<string:assignment_id>")
 @jwt_required()
 def patch_assignment(assignment_id: str):
-    """Update position (reorder) or title/description of an assignment."""
+    """Update position or title of an assignment identity record."""
     conn = get_db()
     user_id = int(get_jwt_identity())
     a = q.get_assignment(conn, assignment_id, user_id)
@@ -460,11 +453,35 @@ def patch_assignment(assignment_id: str):
         updates["position"] = int(body["position"])
     if "title" in body:
         updates["title"] = body["title"] or a["title"]
-    if "description" in body:
-        updates["description"] = body["description"]
 
     a = q.update_assignment(conn, assignment_id, user_id, **updates)
-    return jsonify(_assignment_dict(a))
+    snap = q.latest_snapshot(conn, assignment_id)
+    return jsonify(_assignment_dict(a, snap))
+
+
+@app.post("/api/assignments/<string:assignment_id>/snapshots")
+@jwt_required()
+def create_snapshot(assignment_id: str):
+    """Save a snapshot — manual save point or Canvas push record."""
+    conn = get_db()
+    user_id = int(get_jwt_identity())
+    a = q.get_assignment(conn, assignment_id, user_id)
+    if not a:
+        return jsonify({"error": "not found"}), 404
+
+    body = request.get_json(force=True)
+    content = body.get("content")
+    if not content:
+        return jsonify({"error": "content required"}), 400
+
+    content.setdefault("format_version", "1")
+    label = body.get("label")  # 'canvas_push' | 'manual' | None
+
+    snap = q.create_snapshot(conn, assignment_id, user_id, content, label)
+    q.append_log(conn, user_id, "assignment", assignment_id, "save",
+                 json.dumps({"snapshot_id": snap["id"], "label": label}))
+
+    return jsonify({"id": snap["id"], "snapshotAt": snap["snapshot_at"]}), 201
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
@@ -554,23 +571,17 @@ def chat():
         q.append_log(conn, user_id, context_type, context_id, "ai_turn", reply,
                      replied_to=user_entry["id"] if user_entry else None)
 
-    # Persist crystallized assignment if we have a course
+    # Crystallized assignment — create identity record + initial snapshot
     if assignment_data and course_id:
         course = q.get_course(conn, int(course_id), user_id)
         if course:
-            a = q.create_assignment(
-                conn,
-                user_id=user_id,
-                course_id=course["id"],
-                module_label=assignment_data.get("module", ""),
-                title=assignment_data.get("title", "Untitled"),
-                description=assignment_data.get("description", ""),
-                learning_outcomes=assignment_data.get("learning_outcomes", []),
-                aligned_outcomes=assignment_data.get("aligned_outcomes", []),
-                points_possible=assignment_data.get("points_possible", 100),
-                submission_types=assignment_data.get("submission_types", []),
-                rubric=assignment_data.get("rubric", []),
-            )
+            module_label = assignment_data.get("module", "")
+            title = assignment_data.get("title", "Untitled")
+            position = q.next_position_in_module(conn, course["id"], user_id, module_label)
+            a = q.create_assignment(conn, user_id, course["id"], module_label, title, position)
+            q.append_log(conn, user_id, "assignment", a["id"], "created", title)
+            content = {"format_version": "1", **assignment_data}
+            q.create_snapshot(conn, a["id"], user_id, content, label="crystallized")
             assignment_data["id"] = a["id"]
 
     return jsonify({"reply": reply, "assignment": assignment_data})

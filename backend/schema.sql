@@ -39,26 +39,48 @@ CREATE TABLE IF NOT EXISTS learning_outcomes (
     created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
--- Assignments belong directly to a course + user.
--- No session intermediary.
--- shared: the unit of provenance — this assignment + its log goes to GRAD, otter, etc.
+-- Assignments are identity records — the thing that exists in a course.
+-- The live document lives in log_entries (action_type: 'edit').
+-- title and module_label are here for list views without reducing the log.
+-- position: order within module; null = created_at order
 CREATE TABLE IF NOT EXISTS assignments (
-    id                   TEXT    PRIMARY KEY,  -- uuid
-    user_id              INTEGER NOT NULL REFERENCES users(id),
-    course_id            INTEGER NOT NULL REFERENCES courses(id),
-    module_label         TEXT    NOT NULL DEFAULT '',
-    title                TEXT    NOT NULL DEFAULT 'Untitled',
-    description          TEXT    NOT NULL DEFAULT '',
-    learning_outcomes    TEXT    NOT NULL DEFAULT '[]',  -- JSON array
-    aligned_outcomes     TEXT    NOT NULL DEFAULT '[]',  -- JSON array
-    points_possible      INTEGER NOT NULL DEFAULT 100,
-    submission_types     TEXT    NOT NULL DEFAULT '[]',  -- JSON array
-    rubric               TEXT    NOT NULL DEFAULT '[]',  -- JSON array
-    position             INTEGER,                        -- order within module; null = created_at order
-    canvas_assignment_id TEXT,
-    canvas_html_url      TEXT,
-    shared               INTEGER NOT NULL DEFAULT 0,     -- boolean
-    created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
+    id           TEXT    PRIMARY KEY,  -- uuid
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    course_id    INTEGER NOT NULL REFERENCES courses(id),
+    module_label TEXT    NOT NULL DEFAULT '',
+    title        TEXT    NOT NULL DEFAULT 'Untitled',
+    position     INTEGER,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Snapshots are frozen moments — what got pushed to Canvas, or an explicit save point.
+-- content: JSON blob. Root fields are portable. canvas{} namespace is Canvas-specific.
+-- format_version: migration handle for the melty future.
+--
+-- content shape:
+-- {
+--   "format_version": "1",
+--   "title": "...",
+--   "description": "...",          -- HTML, student-facing
+--   "points_possible": 100,
+--   "submission_types": [...],
+--   "rubric": [...],
+--   "aligned_outcomes": [
+--     { "id": "...", "text": "...", "source": "canvas_outcome" }
+--   ],
+--   "canvas": {
+--     "assignment_id": "...",
+--     "html_url": "...",
+--     "course_id": "..."
+--   }
+-- }
+CREATE TABLE IF NOT EXISTS snapshots (
+    id           INTEGER PRIMARY KEY,
+    assignment_id TEXT   NOT NULL REFERENCES assignments(id),
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    content      TEXT    NOT NULL,  -- JSON blob
+    label        TEXT,              -- 'canvas_push' | 'manual' | null
+    snapshot_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 -- The log. Every action is an entry.

@@ -154,6 +154,8 @@ def create_learning_outcome(
 
 
 # ── Assignments ───────────────────────────────────────────────────────────────
+# Assignments are identity records. The live document is in log_entries (action_type='edit').
+# title and module_label are here for list views without reducing the log.
 
 def get_assignment(
     conn: sqlite3.Connection, assignment_id: str, user_id: int
@@ -190,28 +192,12 @@ def create_assignment(
     course_id: int,
     module_label: str,
     title: str,
-    description: str = "",
-    learning_outcomes: list = None,
-    aligned_outcomes: list = None,
-    points_possible: int = 100,
-    submission_types: list = None,
-    rubric: list = None,
     position: Optional[int] = None,
 ) -> sqlite3.Row:
     assignment_id = str(uuid.uuid4())
     conn.execute(
-        """INSERT INTO assignments (id, user_id, course_id, module_label, title, description,
-           learning_outcomes, aligned_outcomes, points_possible, submission_types, rubric, position)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            assignment_id, user_id, course_id, module_label, title, description,
-            json.dumps(learning_outcomes or []),
-            json.dumps(aligned_outcomes or []),
-            points_possible,
-            json.dumps(submission_types or []),
-            json.dumps(rubric or []),
-            position,
-        ),
+        "INSERT INTO assignments (id, user_id, course_id, module_label, title, position) VALUES (?, ?, ?, ?, ?, ?)",
+        (assignment_id, user_id, course_id, module_label, title, position),
     )
     conn.commit()
     return get_assignment(conn, assignment_id, user_id)
@@ -223,28 +209,50 @@ def update_assignment(
     user_id: int,
     **fields,
 ) -> Optional[sqlite3.Row]:
-    """Update arbitrary fields on an assignment. Only touches what's passed."""
-    allowed = {"title", "description", "position", "canvas_assignment_id",
-               "canvas_html_url", "shared", "module_label",
-               "learning_outcomes", "aligned_outcomes", "rubric",
-               "points_possible", "submission_types"}
+    allowed = {"title", "module_label", "position"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return get_assignment(conn, assignment_id, user_id)
-
-    # JSON-encode list fields
-    for list_field in ("learning_outcomes", "aligned_outcomes", "rubric", "submission_types"):
-        if list_field in updates and isinstance(updates[list_field], list):
-            updates[list_field] = json.dumps(updates[list_field])
-
     set_clause = ", ".join(f"{k} = ?" for k in updates)
-    values = list(updates.values()) + [assignment_id, user_id]
     conn.execute(
         f"UPDATE assignments SET {set_clause} WHERE id = ? AND user_id = ?",
-        values,
+        [*updates.values(), assignment_id, user_id],
     )
     conn.commit()
     return get_assignment(conn, assignment_id, user_id)
+
+
+# ── Snapshots ─────────────────────────────────────────────────────────────────
+# Frozen moments. What got pushed to Canvas, or an explicit save point.
+# content is a JSON blob — see schema.sql for the documented shape.
+
+def create_snapshot(
+    conn: sqlite3.Connection,
+    assignment_id: str,
+    user_id: int,
+    content: dict,
+    label: Optional[str] = None,
+) -> sqlite3.Row:
+    cur = conn.execute(
+        "INSERT INTO snapshots (assignment_id, user_id, content, label) VALUES (?, ?, ?, ?)",
+        (assignment_id, user_id, json.dumps(content), label),
+    )
+    conn.commit()
+    return conn.execute("SELECT * FROM snapshots WHERE id = ?", (cur.lastrowid,)).fetchone()
+
+
+def list_snapshots(conn: sqlite3.Connection, assignment_id: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM snapshots WHERE assignment_id = ? ORDER BY snapshot_at",
+        (assignment_id,),
+    ).fetchall()
+
+
+def latest_snapshot(conn: sqlite3.Connection, assignment_id: str) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM snapshots WHERE assignment_id = ? ORDER BY snapshot_at DESC LIMIT 1",
+        (assignment_id,),
+    ).fetchone()
 
 
 # ── Log entries ───────────────────────────────────────────────────────────────
