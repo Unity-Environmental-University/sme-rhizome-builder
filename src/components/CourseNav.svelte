@@ -22,7 +22,7 @@
     outcomes: string[];
     outcomeRows: OutcomeRow[];
   };
-  type View = { kind: 'course' } | { kind: 'module'; week: number };
+  type View = { kind: 'course' } | { kind: 'module'; week: number } | { kind: 'editor'; week: number; assignmentId: string; isNew?: boolean };
 
   export let course: CourseShape;
   export let modules: ModuleShape[];
@@ -52,9 +52,9 @@
       >
         <button
           class="course-nav__module"
-          class:active={view.kind === 'module' && view.week === mod.week}
+          class:active={(view.kind === 'module' || view.kind === 'editor') && view.week === mod.week}
           on:click={() => dispatch('selectModule', mod.week)}
-          aria-current={view.kind === 'module' && view.week === mod.week ? 'page' : undefined}
+          aria-current={(view.kind === 'module' || view.kind === 'editor') && view.week === mod.week ? 'page' : undefined}
         >
           <span class="course-nav__week">W{mod.week}</span>
           <span class="course-nav__module-title">{mod.title}</span>

@@ -5,6 +5,7 @@
   import CourseNav from './CourseNav.svelte';
   import CourseOverview from './CourseOverview.svelte';
   import ModuleView from './ModuleView.svelte';
+  import AssignmentPane from './AssignmentPane.svelte';
   import ThreadSidebar from './ThreadSidebar.svelte';
   import { sidebarOpen } from '../stores/threads';
 
@@ -28,7 +29,10 @@
     outcomeIds: number[];
     assignments: AssignmentStub[];
   };
-  type View = { kind: 'course' } | { kind: 'module'; week: number };
+  type View =
+    | { kind: 'course' }
+    | { kind: 'module'; week: number }
+    | { kind: 'editor'; week: number; assignmentId: string; isNew?: boolean };
 
   let course: CourseShape | null = null;
   let modules: ModuleShape[] = [];
@@ -94,8 +98,13 @@
 
   $: gridCols = $sidebarOpen ? '260px 1fr 320px' : '260px 1fr';
 
-  $: activeModule = view.kind === 'module'
-    ? modules.find(m => view.kind === 'module' && m.week === view.week) ?? null
+  function getViewWeek(v: View): number | null {
+    return v.kind === 'module' ? v.week : v.kind === 'editor' ? v.week : null;
+  }
+
+  $: viewWeek = getViewWeek(view);
+  $: activeModule = viewWeek !== null
+    ? modules.find(m => m.week === viewWeek) ?? null
     : null;
 
   $: activeOutcomes = (activeModule && course)
@@ -103,6 +112,37 @@
         .map(id => course!.outcomeRows.find(lo => lo.id === id))
         .filter((lo): lo is OutcomeRow => !!lo)
     : [];
+
+  function openAssignment(week: number, assignmentId: string) {
+    view = { kind: 'editor', week, assignmentId };
+  }
+
+  function newAssignment(week: number) {
+    view = { kind: 'editor', week, assignmentId: '', isNew: true };
+  }
+
+  function handleEditorSaved(event: CustomEvent<{ id: string; title: string; module_label: string }>) {
+    const { id, title, module_label } = event.detail;
+    modules = modules.map(m => {
+      const ml = `${course!.periodType} ${m.week}`;
+      if (ml !== module_label) return m;
+      const exists = m.assignments.some(a => a.id === id);
+      if (exists) {
+        return { ...m, assignments: m.assignments.map(a => a.id === id ? { ...a, title } : a) };
+      }
+      return { ...m, assignments: [...m.assignments, { id, title, module_label, position: null, snapshot: null }] };
+    });
+    // Update the view to use the real ID if this was a new assignment
+    if (view.kind === 'editor' && !view.assignmentId) {
+      view = { kind: 'editor', week: view.week, assignmentId: id };
+    }
+  }
+
+  function handleEditorBack() {
+    if (view.kind === 'editor') {
+      view = { kind: 'module', week: view.week };
+    }
+  }
 
   function handleAssignmentSaved(event: CustomEvent<AssignmentStub>) {
     if (!activeModule) return;
@@ -140,22 +180,32 @@
     on:selectModule={(e) => selectModule(e.detail)}
   />
 
-  <main class="course-main">
-    <div class="course-main__viewport">
-      {#if view.kind === 'course'}
-        <div in:fade={{ duration: 320, delay: 80 }}>
-          <CourseOverview {course} />
-        </div>
-      {:else if view.kind === 'module' && activeModule}
+  <main class="course-main" class:editor-active={view.kind === 'editor'}>
+    {#if view.kind === 'course'}
+      <div class="course-main__viewport" in:fade={{ duration: 320, delay: 80 }}>
+        <CourseOverview {course} />
+      </div>
+    {:else if view.kind === 'module' && activeModule}
+      <div class="course-main__viewport">
         <ModuleView
           {activeModule}
           {activeOutcomes}
           {course}
-          on:assignmentSaved={handleAssignmentSaved}
+          on:openAssignment={(e) => openAssignment(activeModule.week, e.detail.assignmentId)}
+          on:newAssignment={() => newAssignment(activeModule.week)}
           on:assignmentsReordered={handleAssignmentsReordered}
         />
-      {/if}
-    </div>
+      </div>
+    {:else if view.kind === 'editor'}
+      <AssignmentPane
+        assignmentId={view.assignmentId || null}
+        moduleLabel="{course.periodType} {view.week}"
+        {course}
+        alignedOutcomes={activeOutcomes}
+        on:saved={handleEditorSaved}
+        on:back={handleEditorBack}
+      />
+    {/if}
   </main>
 
   {#if $sidebarOpen}
@@ -189,9 +239,14 @@
   }
 
   .course-main {
-    padding: $space-xl $space-xl $space-xl;
+    padding: $space-xl;
     max-width: 700px;
     overflow: hidden;
+
+    &.editor-active {
+      padding: 0;
+      max-width: none;
+    }
   }
 
   .course-main__viewport {

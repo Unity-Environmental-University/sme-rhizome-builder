@@ -3,9 +3,6 @@
   import { quintOut } from 'svelte/easing';
   import { createEventDispatcher } from 'svelte';
   import axios from 'axios';
-  import AssignmentEditor from './AssignmentEditor.svelte';
-  import ThreadSidebar from './ThreadSidebar.svelte';
-  import { activeAssignmentId, sidebarOpen } from '../stores/threads';
 
   type OutcomeRow = { id: number; text: string; position: number };
   type AssignmentSnapshot = { id: number; label: string | null; description: string };
@@ -38,87 +35,11 @@
   export let activeOutcomes: OutcomeRow[];
   export let course: CourseShape;
 
-  // null = editor closed, '' = new assignment, '<uuid>' = editing existing
-  let editingId: string | null = null;
-  let assignmentTitle = '';
-  let editorContent = '';
-  let editorKey = 0; // force TipTap remount when switching assignments
-  let saving = false;
-
-  $: editorOpen = editingId !== null;
-  $: isNew = editingId === '';
-
   const dispatch = createEventDispatcher<{
-    assignmentSaved: AssignmentStub;
+    openAssignment: { assignmentId: string };
+    newAssignment: void;
     assignmentsReordered: { week: number; assignments: AssignmentStub[] };
   }>();
-
-  function openNew() {
-    assignmentTitle = '';
-    editorContent = '';
-    editorKey += 1;
-    editingId = '';
-    activeAssignmentId.set(null);
-  }
-
-  function openExisting(a: AssignmentStub) {
-    assignmentTitle = a.title;
-    editorContent = a.snapshot?.description ?? '';
-    editorKey += 1;
-    editingId = a.id;
-    activeAssignmentId.set(a.id);
-  }
-
-  function closeEditor() {
-    editingId = null;
-    assignmentTitle = '';
-    editorContent = '';
-    activeAssignmentId.set(null);
-    sidebarOpen.set(false);
-  }
-
-  async function saveAssignment() {
-    if (saving) return;
-    saving = true;
-    try {
-      if (isNew) {
-        const res = await axios.post('/api/assignments', {
-          course_id: course.id,
-          title: assignmentTitle.trim() || 'Untitled',
-          description: editorContent,
-          module_label: `${course.periodType} ${activeModule.week}`,
-          aligned_outcome_ids: activeOutcomes.map(o => o.id),
-        }, { withCredentials: true });
-        dispatch('assignmentSaved', res.data as AssignmentStub);
-      } else {
-        // Update title if changed, then write a new snapshot with current content
-        const title = assignmentTitle.trim() || 'Untitled';
-        await axios.patch(`/api/assignments/${editingId}`, { title }, { withCredentials: true });
-        await axios.post(`/api/assignments/${editingId}/snapshots`, {
-          content: {
-            format_version: '1',
-            title,
-            description: editorContent,
-            aligned_outcome_ids: activeOutcomes.map(o => o.id),
-          },
-          label: 'draft',
-        }, { withCredentials: true });
-        // Reflect updated content locally
-        dispatch('assignmentSaved', {
-          id: editingId,
-          title,
-          module_label: `${course.periodType} ${activeModule.week}`,
-          position: null,
-          snapshot: { id: 0, label: 'draft', description: editorContent },
-        } as AssignmentStub);
-      }
-      closeEditor();
-    } catch (e) {
-      console.error('[ModuleView] save failed:', e);
-    } finally {
-      saving = false;
-    }
-  }
 
   async function moveAssignment(index: number, dir: -1 | 1) {
     const newIndex = index + dir;
@@ -183,7 +104,7 @@
             <span class="module-view__assignment-label">{course.periodType} {activeModule.week}</span>
             <button
               class="module-view__assignment-name"
-              on:click={() => openExisting(a)}
+              on:click={() => dispatch('openAssignment', { assignmentId: a.id })}
               aria-label="Open {a.title}"
             >{a.title}</button>
             <span class="module-view__draft">draft</span>
@@ -206,65 +127,14 @@
       </ul>
     {/if}
 
-    {#if !editorOpen}
-      <button
-        class="module-view__add"
-        on:click={openNew}
-        in:fade={{ duration: 280, delay: 200 }}
-      >
-        + add assignment
-      </button>
-    {/if}
-  </section>
-
-  {#if editorOpen}
-    <section
-      class="module-view__editor"
-      aria-label="{isNew ? 'New' : 'Edit'} assignment"
-      in:fly={{ y: 20, duration: 440, easing: quintOut }}
+    <button
+      class="module-view__add"
+      on:click={() => dispatch('newAssignment')}
+      in:fade={{ duration: 280, delay: 200 }}
     >
-      <header class="module-view__editor-header">
-        <input
-          class="module-view__title-input"
-          type="text"
-          placeholder="Assignment title"
-          autocomplete="off"
-          bind:value={assignmentTitle}
-        />
-        <button
-          class="module-view__editor-close"
-          on:click={closeEditor}
-          aria-label="Close editor"
-        >✕</button>
-      </header>
-
-      <div class="module-view__editor-area" class:sidebar-open={$sidebarOpen}>
-        <div class="module-view__editor-main">
-          {#key editorKey}
-            <AssignmentEditor
-              content={editorContent}
-              assignmentId={editingId || null}
-              placeholder="What will students do in {course.periodType.toLowerCase()} {activeModule.week}?"
-              onUpdate={(html) => { editorContent = html; }}
-            />
-          {/key}
-        </div>
-        {#if $sidebarOpen}
-          <div class="module-view__thread-panel">
-            <ThreadSidebar />
-          </div>
-        {/if}
-      </div>
-
-      <footer class="module-view__editor-footer">
-        <button
-          class="module-view__save"
-          on:click={saveAssignment}
-          disabled={saving}
-        >{saving ? 'saving…' : 'save draft'}</button>
-      </footer>
-    </section>
-  {/if}
+      + add assignment
+    </button>
+  </section>
 </article>
 
 <style lang="scss">
@@ -434,89 +304,5 @@
       border-color: $una-mid-green;
       color: $una-dark-1;
     }
-  }
-
-  .module-view__editor {
-    border: 1px solid $color-border;
-    background: $color-bg-paper;
-    box-shadow: $shadow-paper;
-  }
-
-  .module-view__editor-header {
-    display: flex;
-    align-items: center;
-    gap: $space-sm;
-    padding: $space-md $space-lg;
-    border-bottom: 1px solid $color-border;
-    background: $una-light-green;
-  }
-
-  .module-view__title-input {
-    flex: 1;
-    font-family: $font-serif;
-    font-size: 1.1rem;
-    border: none;
-    background: transparent;
-    color: $una-dark-1;
-    outline: none;
-
-    &::placeholder {
-      color: $una-mid-green;
-      opacity: 0.6;
-      font-style: italic;
-    }
-  }
-
-  .module-view__editor-close {
-    background: none;
-    border: none;
-    color: $una-mid-green;
-    cursor: pointer;
-    font-size: 0.9rem;
-    padding: $space-xs;
-    transition: color 160ms ease;
-
-    &:hover { color: $una-dark-1; }
-  }
-
-  .module-view__editor-area {
-    display: flex;
-    min-height: 320px;
-
-    &.sidebar-open {
-      .module-view__editor-main { flex: 1; min-width: 0; }
-    }
-  }
-
-  .module-view__editor-main {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .module-view__thread-panel {
-    width: 280px;
-    flex-shrink: 0;
-  }
-
-  .module-view__editor-footer {
-    display: flex;
-    justify-content: flex-end;
-    padding: $space-sm $space-lg;
-    border-top: 1px solid $color-border;
-    background: $una-light-green;
-  }
-
-  .module-view__save {
-    background: $una-dark-1;
-    color: white;
-    border: none;
-    padding: $space-sm $space-xl;
-    font-family: $font-sans;
-    font-size: 0.85rem;
-    cursor: pointer;
-    letter-spacing: 0.03em;
-    transition: background 240ms ease;
-
-    &:hover { background: $una-dark-2; }
   }
 </style>
