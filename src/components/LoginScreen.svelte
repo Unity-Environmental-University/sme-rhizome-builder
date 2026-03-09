@@ -28,6 +28,7 @@
       } catch (err) {
         if (axios.isAxiosError(err) && err.response?.status === 503) {
           demoAvailable = true;
+          if (import.meta.env.DEV) await demoLogin();
         }
       }
     }

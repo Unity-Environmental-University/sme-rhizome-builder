@@ -13,6 +13,29 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from db import DB_PATH, SCHEMA_PATH
 
+MODULES = [
+    (0, "Foundations of Coral Biology",
+     "The architecture of a reef. Polyp biology, symbiosis with zooxanthellae, calcification. "
+     "What a healthy system looks like before anything goes wrong.",
+     [0]),
+    (1, "Bleaching Mechanisms",
+     "Thermal stress, oxidative damage, the breakdown of the coral-algae partnership. "
+     "What is actually happening inside the animal when a reef turns white.",
+     [0, 1]),
+    (2, "Stressors and Monitoring",
+     "Local and global pressures acting in concert. How to read a reef — what field data and "
+     "remote sensing can and cannot tell you about where a system is headed.",
+     [1, 3]),
+    (3, "Restoration Strategies",
+     "Coral gardening, assisted gene flow, substrate work. The tradeoffs between intervention "
+     "and letting systems find their own way. What works, where, and under what conditions.",
+     [2]),
+    (4, "Social and Political Dimensions",
+     "A reef does not exist outside of the people who live near it, fish from it, dive on it, "
+     "govern it. Conservation decisions are political decisions. This week asks students to sit with that.",
+     [4]),
+]
+
 OUTCOMES = [
     (0, "Identify the physiological mechanisms underlying coral bleaching and evaluate "
         "the relative contribution of thermal stress, ocean acidification, and local stressors."),
@@ -83,6 +106,31 @@ def main():
         print(f"Seeded {len(OUTCOMES)} learning outcomes.")
     else:
         print(f"Learning outcomes already seeded ({existing} rows).")
+
+    # Fetch outcome ids in position order so outcome_ids indices map correctly
+    outcome_rows = conn.execute(
+        "SELECT id FROM learning_outcomes WHERE course_id = ? ORDER BY position", (course["id"],)
+    ).fetchall()
+    outcome_id_by_position = {i: row["id"] for i, row in enumerate(outcome_rows)}
+
+    # Modules
+    existing_modules = conn.execute(
+        "SELECT COUNT(*) as n FROM modules WHERE course_id = ?", (course["id"],)
+    ).fetchone()["n"]
+
+    if existing_modules == 0:
+        import json
+        for position, title, description, outcome_indices in MODULES:
+            ids = [outcome_id_by_position[i] for i in outcome_indices if i in outcome_id_by_position]
+            conn.execute(
+                """INSERT INTO modules (course_id, title, description, position, outcome_ids)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (course["id"], title, description, position, json.dumps(ids)),
+            )
+        conn.commit()
+        print(f"Seeded {len(MODULES)} modules.")
+    else:
+        print(f"Modules already seeded ({existing_modules} rows).")
 
     conn.close()
     print("Done.")

@@ -39,6 +39,21 @@ CREATE TABLE IF NOT EXISTS learning_outcomes (
     created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Modules: the weeks (or units) that structure a course.
+-- outcome_ids: JSON array of learning_outcome.id values — the outcomes this module addresses.
+-- canvas_module_id: optional link to a Canvas module, for future sync.
+-- position: display order within the course.
+CREATE TABLE IF NOT EXISTS modules (
+    id               INTEGER PRIMARY KEY,
+    course_id        INTEGER NOT NULL REFERENCES courses(id),
+    canvas_module_id TEXT,
+    title            TEXT    NOT NULL DEFAULT '',
+    description      TEXT    NOT NULL DEFAULT '',
+    position         INTEGER NOT NULL DEFAULT 0,
+    outcome_ids      TEXT    NOT NULL DEFAULT '[]',  -- JSON array of learning_outcome ids
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Assignments are identity records — the thing that exists in a course.
 -- The live document lives in log_entries (action_type: 'edit').
 -- title and module_label are here for list views without reducing the log.

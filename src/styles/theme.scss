@@ -31,3 +31,14 @@ $border-top:   4px solid $una-gold;
 // --- Shadows ---
 $shadow-paper: 0 2px 8px rgba($una-dark-1, 0.12);
 
+// --- Comment mark colors ---
+// Used by global.scss (CSS custom property generation) and EditorCanvas (shader heat sources).
+// agent: warm gold — note slipped under the door, doesn't announce itself
+// sme:   warm white — deliberate, the SME's own hand
+// ld:    cool blue  — structural, the designer's frame
+$mark-colors: (
+  'agent': rgba(255, 200, 60,  0.5),
+  'sme':   rgba(255, 245, 200, 0.7),
+  'ld':    rgba(140, 190, 255, 0.5),
+);
+

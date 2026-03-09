@@ -3,13 +3,104 @@
   import { Editor } from '@tiptap/core';
   import StarterKit from '@tiptap/starter-kit';
   import Placeholder from '@tiptap/extension-placeholder';
+  import axios from 'axios';
+  import EditorCanvas from './EditorCanvas.svelte';
+  import type { MarkData } from './EditorCanvas.svelte';
+  import { CommentMark } from './CommentMark';
+  import { openThread, notifyLogChanged } from '../stores/threads';
 
   export let content: string = '';
   export let placeholder: string = 'What will students do here?';
   export let onUpdate: (html: string) => void = () => {};
+  export let assignmentId: string | null = null;
 
+  let surface: HTMLElement;
   let element: HTMLElement;
   let editor: Editor;
+  let canvasMarks: MarkData[] = [];
+  let hasSelection = false;
+
+  // Expose: place a comment mark on the current selection, returns the commentId
+  export function getSelection(): { from: number; to: number; text: string } | null {
+    if (!editor) return null;
+    const { from, to } = editor.state.selection;
+    if (from === to) return null;
+    return { from, to, text: editor.state.doc.textBetween(from, to) };
+  }
+
+  export function placeComment(commentId: string, from: number, to: number, source: 'agent' | 'sme' | 'ld' = 'agent') {
+    if (!editor) return;
+    editor.commands.setComment(commentId, from, to, source);
+  }
+
+  async function handleUnstuck() {
+    if (!assignmentId) return;
+    const sel = getSelection();
+    const commentId = crypto.randomUUID();
+    const payload: Record<string, unknown> = {
+      action_type: 'sme_anchor',
+      content: JSON.stringify({
+        comment_id: commentId,
+        text: sel ? `[unstuck: "${sel.text}"]` : '[unstuck: whole draft]',
+        source: 'sme',
+        mode: 'unstuck',
+        ...(sel ? { from: sel.from, to: sel.to } : {}),
+      }),
+    };
+
+    try {
+      const anchorRes = await axios.post(`/api/log/${assignmentId}`, payload, { withCredentials: true });
+      if (sel) {
+        placeComment(commentId, sel.from, sel.to, 'sme');
+      }
+      openThread(commentId);
+
+      // Ask the concierge to respond — fire and don't block the UI
+      axios.post(`/api/concierge/${assignmentId}`, {
+        anchor_id: anchorRes.data.id,
+        comment_id: commentId,
+      }, { withCredentials: true }).then(() => {
+        notifyLogChanged();
+      }).catch(e => {
+        console.error('[AssignmentEditor] concierge failed:', e);
+      });
+    } catch (e) {
+      console.error('[AssignmentEditor] unstuck failed:', e);
+    }
+  }
+
+  // Recompute canvas mark rects from DOM. Called lazily — only when the mark
+  // set changes, not on every keystroke. Multi-line spans produce multiple rects
+  // (one per line) so each line segment is its own heat source.
+  function computeMarkRects() {
+    if (!surface || !element) return;
+    const surfaceRect = surface.getBoundingClientRect();
+    const markEls = element.querySelectorAll('mark[data-comment-id]');
+    const result: MarkData[] = [];
+
+    markEls.forEach(el => {
+      const commentId = el.getAttribute('data-comment-id')!;
+      const source = (el.getAttribute('data-source') ?? 'agent') as 'agent' | 'sme' | 'ld';
+      const unread = el.hasAttribute('data-unread');
+
+      // getClientRects() gives one rect per line for wrapped inline elements
+      Array.from(el.getClientRects()).forEach(r => {
+        result.push({
+          commentId,
+          source,
+          unread,
+          rect: {
+            left:   r.left   - surfaceRect.left,
+            top:    r.top    - surfaceRect.top,
+            right:  r.right  - surfaceRect.left,
+            bottom: r.bottom - surfaceRect.top,
+          },
+        });
+      });
+    });
+
+    canvasMarks = result;
+  }
 
   onMount(() => {
     editor = new Editor({
@@ -17,15 +108,35 @@
       extensions: [
         StarterKit,
         Placeholder.configure({ placeholder }),
+        CommentMark,
       ],
       content,
       editorProps: {
         attributes: {
           class: 'assignment-editor__body',
         },
+        handleClick(view, _pos, event) {
+          const target = event.target as HTMLElement;
+          const markEl = target.closest('mark[data-comment-id]');
+          if (markEl) {
+            const commentId = markEl.getAttribute('data-comment-id');
+            if (commentId) openThread(commentId);
+            return true; // consumed
+          }
+          return false;
+        },
       },
-      onUpdate({ editor }) {
-        onUpdate(editor.getHTML());
+      onCreate() {
+        Promise.resolve().then(computeMarkRects);
+      },
+      onSelectionUpdate({ editor: e }) {
+        const { from, to } = e.state.selection;
+        hasSelection = from !== to;
+      },
+      onUpdate({ editor: e }) {
+        onUpdate(e.getHTML());
+        // Recompute on every doc change — marks may have moved with the text
+        Promise.resolve().then(computeMarkRects);
       },
     });
   });
@@ -74,9 +185,20 @@
       on:click={() => editor.chain().focus().toggleBlockquote().run()}
       title="Blockquote"
     >"</button>
+    <span class="assignment-editor__divider"></span>
+    <button
+      class="assignment-editor__tool assignment-editor__unstuck"
+      class:active={hasSelection}
+      on:click={handleUnstuck}
+      title={hasSelection ? 'Ask about this passage' : 'Ask for help with the whole draft'}
+      disabled={!assignmentId}
+    >?</button>
   </div>
 
-  <div class="assignment-editor__surface" bind:this={element}></div>
+  <div class="assignment-editor__surface" bind:this={surface}>
+    <EditorCanvas marks={canvasMarks} />
+    <div class="assignment-editor__body-host" bind:this={element}></div>
+  </div>
 </div>
 
 <style lang="scss">
@@ -129,10 +251,28 @@
     margin: 0 $space-xs;
   }
 
+  .assignment-editor__unstuck {
+    font-family: $font-serif;
+    font-style: italic;
+    font-weight: 600;
+    color: $una-gold;
+
+    &.active {
+      border-color: $una-gold;
+      background: rgba(196, 164, 75, 0.08);
+    }
+  }
+
   .assignment-editor__surface {
     flex: 1;
-    padding: $space-lg;
+    position: relative;
     overflow-y: auto;
+  }
+
+  .assignment-editor__body-host {
+    position: relative;
+    z-index: 1;
+    padding: $space-lg;
 
     :global(.assignment-editor__body) {
       outline: none;
@@ -176,6 +316,34 @@
         height: 0;
         font-style: italic;
       }
+
+      :global(mark.comment-anchor) {
+        background: transparent;
+        border-bottom: 1.5px solid rgba(196, 164, 75, 0.45);
+        cursor: pointer;
+        transition: border-color 200ms ease, background 200ms ease;
+
+        &:hover {
+          background: rgba(196, 164, 75, 0.08);
+          border-color: rgba(196, 164, 75, 0.7);
+        }
+      }
+
+      :global(mark.comment-anchor[data-source="sme"]) {
+        border-color: rgba(120, 140, 100, 0.4);
+        &:hover { background: rgba(120, 140, 100, 0.06); border-color: rgba(120, 140, 100, 0.65); }
+      }
+
+      :global(mark.comment-anchor[data-source="ld"]) {
+        border-color: rgba(100, 140, 180, 0.4);
+        &:hover { background: rgba(100, 140, 180, 0.06); border-color: rgba(100, 140, 180, 0.65); }
+      }
+
+      :global(mark.comment-anchor[data-unread]) {
+        border-bottom-width: 2px;
+      }
+
     }
   }
+
 </style>

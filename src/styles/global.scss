@@ -2,6 +2,22 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+// Comment mark highlights. One rule reads --mark-color; the @each below sets it
+// per source. CSS drives the underline; the EditorCanvas shader drives the glow.
+@each $source, $color in $mark-colors {
+  [data-source='#{$source}'] { --mark-color: #{$color}; }
+}
+
+mark.comment-anchor {
+  background: transparent;
+  border-radius: 2px;
+  padding: 1px 0;
+  cursor: pointer;
+  border-bottom: 1.5px solid var(--mark-color, rgba(255, 200, 60, 0.5));
+
+  &[data-unread] { border-bottom-width: 2px; }
+}
+
 body {
   margin: 0;
   background: $color-bg-body;

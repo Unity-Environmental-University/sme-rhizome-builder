@@ -1,6 +1,11 @@
 """
 SME Rhizome Builder — Flask backend.
 
+Core endpoints (auth, courses, assignments, chat).
+Canvas proxy routes → canvas.py
+Bearing routes      → bearings.py
+Admin dashboard     → admin.py
+
 Endpoints:
     GET  /api/auth/login                 → redirect to Canvas OAuth
     GET  /api/auth/callback              → exchange code, set JWT cookie
@@ -11,21 +16,17 @@ Endpoints:
     GET  /api/courses                    → list user's courses
     POST /api/courses                    → create or update a course
 
+    GET  /api/modules?course_id=N        → list modules for a course
+
     GET  /api/assignments?course_id=N    → list assignments for a course
     POST /api/assignments                → create assignment from editor
-    PATCH /api/assignments/<id>          → update position / title / description
+    PATCH /api/assignments/<id>          → update position / title
+    POST /api/assignments/<id>/snapshots → save a snapshot (manual or canvas push)
 
-    POST /api/chat                       → conversation turn; persists messages to context
-    POST /api/canvas/assignment          → push draft to Canvas
-    GET  /api/canvas/assignments         → list Canvas assignments for a course
-    GET  /api/canvas/courses             → list Canvas courses user teaches
+    GET  /api/log/<assignment_id>        → list log entries for an assignment
+    POST /api/log/<assignment_id>        → append a log entry for an assignment
 
-    GET  /api/bearings?course_id=N       → list bearings for a course
-    POST /api/bearings                   → create a bearing
-    PATCH /api/bearings/<id>             → update weight / likelihood / text
-    DELETE /api/bearings/<id>            → remove bearing + statements
-    POST /api/bearings/<id>/statements   → add observable statement
-    PATCH /api/statements/<id>           → mark observed / disconfirmed / reset
+    POST /api/chat                       → conversation turn; persists to log
 
 Environment:
     ANTHROPIC_API_KEY
@@ -40,11 +41,9 @@ Environment:
 import json
 import os
 import re
-import sys
 
 from datetime import datetime, timedelta, timezone
 
-import anthropic
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, request
@@ -59,6 +58,9 @@ from flask_jwt_extended import (
 )
 
 from admin import admin_bp
+from ai import call_ai
+from bearings import bearings_bp
+from canvas import canvas_bp
 from db import get_db, init_db
 from prompts import build_system_prompt
 import queries as q
@@ -87,6 +89,8 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False   # long-lived for dev; restrict 
 
 jwt = JWTManager(app)
 app.register_blueprint(admin_bp)
+app.register_blueprint(bearings_bp)
+app.register_blueprint(canvas_bp)
 
 # CORS is a class mutating app as a side effect — common Flask pattern.
 # See CORS docs; origins can be env-driven when this moves to production.
@@ -148,30 +152,6 @@ def _assignment_dict(a, snapshot=None) -> dict:
         }
     return out
 
-
-def _bearing_dict(b, statements) -> dict:
-    return {
-        "id": b["id"],
-        "courseId": b["course_id"],
-        "learningOutcomeId": b["learning_outcome_id"],
-        "text": b["text"],
-        "weight": b["weight"],
-        "likelihood": b["likelihood"],
-        "delta": b["weight"] - b["likelihood"],
-        "statements": [_statement_dict(s) for s in statements],
-        "createdAt": b["created_at"],
-        "updatedAt": b["updated_at"],
-    }
-
-
-def _statement_dict(s) -> dict:
-    return {
-        "id": s["id"],
-        "bearingId": s["bearing_id"],
-        "text": s["text"],
-        "observed": s["observed"],
-        "createdAt": s["created_at"],
-    }
 
 
 def _course_context_for_prompt(conn, course) -> dict:
@@ -387,6 +367,36 @@ def upsert_course():
     return jsonify(_course_dict(course, outcome_rows))
 
 
+# ── Module endpoints ──────────────────────────────────────────────────────────
+
+@app.get("/api/modules")
+@jwt_required()
+def list_modules():
+    conn = get_db()
+    user_id = int(get_jwt_identity())
+    course_id = request.args.get("course_id", type=int)
+    if not course_id:
+        return jsonify({"error": "course_id required"}), 400
+    if not q.get_course(conn, course_id, user_id):
+        return jsonify({"error": "not found"}), 404
+
+    modules = q.list_modules(conn, course_id)
+    return jsonify({"modules": [_module_dict(m) for m in modules]})
+
+
+def _module_dict(m) -> dict:
+    outcome_ids = json.loads(m["outcome_ids"]) if isinstance(m["outcome_ids"], str) else m["outcome_ids"]
+    return {
+        "id": m["id"],
+        "courseId": m["course_id"],
+        "title": m["title"],
+        "description": m["description"],
+        "position": m["position"],
+        "outcomeIds": outcome_ids,
+        "canvasModuleId": m["canvas_module_id"],
+    }
+
+
 # ── Assignment endpoints ───────────────────────────────────────────────────────
 
 @app.get("/api/assignments")
@@ -430,11 +440,22 @@ def create_assignment():
     title = body.get("title") or "Untitled"
 
     a = q.create_assignment(conn, user_id, course["id"], module_label, title, position)
-
-    # Log the creation
     q.append_log(conn, user_id, "assignment", a["id"], "created", title)
 
-    return jsonify(_assignment_dict(a)), 201
+    # If the frontend sent content, capture it as the first draft snapshot.
+    description = body.get("description", "")
+    aligned_outcome_ids = body.get("aligned_outcome_ids") or []
+    snap = None
+    if description or aligned_outcome_ids:
+        content = {
+            "format_version": "1",
+            "title": title,
+            "description": description,
+            "aligned_outcome_ids": aligned_outcome_ids,
+        }
+        snap = q.create_snapshot(conn, a["id"], user_id, content, label="draft")
+
+    return jsonify(_assignment_dict(a, snap)), 201
 
 
 @app.patch("/api/assignments/<string:assignment_id>")
@@ -482,6 +503,123 @@ def create_snapshot(assignment_id: str):
                  json.dumps({"snapshot_id": snap["id"], "label": label}))
 
     return jsonify({"id": snap["id"], "snapshotAt": snap["snapshot_at"]}), 201
+
+
+# ── Log endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/api/log/<string:assignment_id>")
+@jwt_required()
+def get_log(assignment_id: str):
+    """Return all log entries for an assignment."""
+    conn = get_db()
+    user_id = int(get_jwt_identity())
+    if not q.get_assignment(conn, assignment_id, user_id):
+        return jsonify({"error": "not found"}), 404
+    rows = q.list_log(conn, "assignment", assignment_id)
+    return jsonify({"entries": [dict(r) for r in rows]})
+
+
+@app.post("/api/log/<string:assignment_id>")
+@jwt_required()
+def post_log(assignment_id: str):
+    """Append a log entry for an assignment."""
+    conn = get_db()
+    user_id = int(get_jwt_identity())
+    if not q.get_assignment(conn, assignment_id, user_id):
+        return jsonify({"error": "not found"}), 404
+    body = request.get_json(force=True)
+    action_type = body.get("action_type", "comment")
+    content = body.get("content", "")
+    replied_to = body.get("replied_to") or None
+    entry = q.append_log(conn, user_id, "assignment", assignment_id, action_type, content, replied_to)
+    return jsonify(dict(entry)), 201
+
+
+# ── Concierge endpoint ────────────────────────────────────────────────────────
+
+@app.post("/api/concierge/<string:assignment_id>")
+@jwt_required()
+def concierge(assignment_id: str):
+    """Respond to an sme_anchor: read context, produce a margin note.
+
+    Body: { anchor_id, comment_id, ?endpoint, ?api_key, ?model }
+    """
+    conn = get_db()
+    user_id = int(get_jwt_identity())
+
+    assignment = q.get_assignment(conn, assignment_id, user_id)
+    if not assignment:
+        return jsonify({"error": "not found"}), 404
+
+    body = request.get_json(force=True)
+    anchor_id = body.get("anchor_id")
+    comment_id = body.get("comment_id")
+    if not anchor_id or not comment_id:
+        return jsonify({"error": "anchor_id and comment_id required"}), 400
+
+    # Read the anchor to get selection/mode info
+    anchor = q.get_log_entry(conn, int(anchor_id))
+    if not anchor:
+        return jsonify({"error": "anchor not found"}), 404
+
+    anchor_content = {}
+    try:
+        anchor_content = json.loads(anchor["content"])
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Gather context
+    snapshot = q.latest_snapshot(conn, assignment_id)
+    draft_html = ""
+    if snapshot:
+        snap_content = json.loads(snapshot["content"]) if isinstance(snapshot["content"], str) else snapshot["content"]
+        draft_html = snap_content.get("description", "")
+
+    course = q.get_course(conn, assignment["course_id"], user_id)
+    course_data = _course_context_for_prompt(conn, course) if course else None
+
+    # Build the user message from what the SME is asking about
+    selection_text = anchor_content.get("text", "")
+    mode = anchor_content.get("mode", "unstuck")
+
+    if anchor_content.get("from") and anchor_content.get("to"):
+        user_msg = f"The SME selected this passage and asked for help:\n\n\"{selection_text}\"\n\nFull draft:\n{draft_html}"
+    else:
+        user_msg = f"The SME asked for help with the whole draft:\n\n{draft_html}"
+
+    # Build prompt with margin_note card
+    from prompts import CONCIERGE_DECK
+    system_prompt = build_system_prompt(course_data, deck=CONCIERGE_DECK)
+
+    # AI config — endpoint is swappable
+    endpoint = body.get("endpoint") or os.environ.get("CONCIERGE_ENDPOINT", "local")
+    api_key = body.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
+    model = body.get("model") or None
+
+    try:
+        response_text = call_ai(
+            endpoint=endpoint,
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "content": user_msg}],
+            api_key=api_key,
+            model=model,
+        )
+    except Exception as e:
+        app.logger.error("Concierge AI error (%s): %s", endpoint, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+    # Log the agent's note — threaded to the anchor
+    note_content = json.dumps({
+        "comment_id": comment_id,
+        "text": response_text,
+        "source": "agent",
+    })
+    note = q.append_log(
+        conn, user_id, "assignment", assignment_id,
+        "agent_note", note_content, replied_to=int(anchor_id),
+    )
+
+    return jsonify(dict(note)), 201
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
@@ -533,29 +671,14 @@ def chat():
     ]
 
     try:
-        if endpoint in ("openai", "ollama"):
-            from openai import OpenAI
-            defaults = {
-                "ollama": ("http://localhost:11434/v1", "qwen2.5:7b", api_key or "ollama"),
-                "openai": ("https://api.openai.com/v1", "gpt-4o-mini", api_key),
-            }
-            default_base, default_model, oa_key = defaults[endpoint]
-            oa_client = OpenAI(api_key=oa_key, base_url=base_url or default_base)
-            oa_response = oa_client.chat.completions.create(
-                model=model_override or default_model,
-                max_tokens=2048,
-                messages=[{"role": "system", "content": system_prompt}] + anthropic_messages,
-            )
-            full_text = oa_response.choices[0].message.content or ""
-        else:
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model=model_override or "claude-haiku-4-5-20251001",
-                max_tokens=2048,
-                system=system_prompt,
-                messages=anthropic_messages,
-            )
-            full_text = response.content[0].text
+        full_text = call_ai(
+            endpoint=endpoint,
+            system_prompt=system_prompt,
+            messages=anthropic_messages,
+            api_key=api_key,
+            base_url=base_url,
+            model=model_override,
+        )
     except Exception as e:
         app.logger.error("AI API error (%s): %s", endpoint, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -585,289 +708,6 @@ def chat():
             assignment_data["id"] = a["id"]
 
     return jsonify({"reply": reply, "assignment": assignment_data})
-
-
-# ── Bearing endpoints ──────────────────────────────────────────────────────────
-# The learning designer's compass. Stars, not destinations.
-
-@app.get("/api/bearings")
-@jwt_required()
-def list_bearings():
-    conn = get_db()
-    user_id = int(get_jwt_identity())
-    course_id = request.args.get("course_id", type=int)
-    if not course_id:
-        return jsonify({"error": "course_id required"}), 400
-
-    if not q.get_course(conn, course_id, user_id):
-        return jsonify({"error": "not found"}), 404
-
-    bearings = q.list_bearings(conn, course_id)
-    result = []
-    for b in bearings:
-        statements = q.list_statements(conn, b["id"])
-        result.append(_bearing_dict(b, statements))
-    return jsonify({"bearings": result})
-
-
-@app.post("/api/bearings")
-@jwt_required()
-def create_bearing():
-    conn = get_db()
-    user_id = int(get_jwt_identity())
-    body = request.get_json(force=True)
-
-    course_id = body.get("course_id")
-    if not course_id:
-        return jsonify({"error": "course_id required"}), 400
-
-    if not q.get_course(conn, int(course_id), user_id):
-        return jsonify({"error": "not found"}), 404
-
-    text = (body.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text required — what direction is this bearing?"}), 400
-
-    b = q.create_bearing(
-        conn,
-        course_id=int(course_id),
-        text=text,
-        weight=body.get("weight", 0.5),
-        likelihood=body.get("likelihood", 0.5),
-        learning_outcome_id=body.get("learning_outcome_id"),
-    )
-    return jsonify(_bearing_dict(b, [])), 201
-
-
-@app.patch("/api/bearings/<int:bearing_id>")
-@jwt_required()
-def update_bearing(bearing_id: int):
-    """Update a bearing's weight, likelihood, or text.
-
-    The delta between weight and likelihood is the signal:
-    high weight + low likelihood = push harder.
-    """
-    conn = get_db()
-    user_id = int(get_jwt_identity())
-    b = q.get_bearing(conn, bearing_id)
-    if not b:
-        return jsonify({"error": "not found"}), 404
-
-    # Ownership check via course
-    if not q.get_course(conn, b["course_id"], user_id):
-        return jsonify({"error": "not found"}), 404
-
-    body = request.get_json(force=True)
-    updates = {}
-    if "text" in body:
-        updates["text"] = body["text"]
-    if "weight" in body:
-        updates["weight"] = max(-1.0, min(1.0, float(body["weight"])))
-    if "likelihood" in body:
-        updates["likelihood"] = max(0.0, min(1.0, float(body["likelihood"])))
-
-    b = q.update_bearing(conn, bearing_id, **updates)
-    statements = q.list_statements(conn, bearing_id)
-    return jsonify(_bearing_dict(b, statements))
-
-
-@app.delete("/api/bearings/<int:bearing_id>")
-@jwt_required()
-def delete_bearing(bearing_id: int):
-    conn = get_db()
-    user_id = int(get_jwt_identity())
-    b = q.get_bearing(conn, bearing_id)
-    if not b:
-        return jsonify({"error": "not found"}), 404
-
-    if not q.get_course(conn, b["course_id"], user_id):
-        return jsonify({"error": "not found"}), 404
-
-    q.delete_bearing(conn, bearing_id)
-    return jsonify({"ok": True})
-
-
-@app.post("/api/bearings/<int:bearing_id>/statements")
-@jwt_required()
-def create_statement(bearing_id: int):
-    """Add an observable statement to a bearing — the evidence layer."""
-    conn = get_db()
-    user_id = int(get_jwt_identity())
-    b = q.get_bearing(conn, bearing_id)
-    if not b:
-        return jsonify({"error": "not found"}), 404
-
-    if not q.get_course(conn, b["course_id"], user_id):
-        return jsonify({"error": "not found"}), 404
-
-    body = request.get_json(force=True)
-    text = (body.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text required — what would you observe?"}), 400
-
-    s = q.create_statement(conn, bearing_id, text, observed=body.get("observed"))
-    return jsonify(_statement_dict(s)), 201
-
-
-@app.patch("/api/statements/<int:statement_id>")
-@jwt_required()
-def update_statement(statement_id: int):
-    """Mark a statement as observed (true), disconfirmed (false), or reset (null)."""
-    conn = get_db()
-    user_id = int(get_jwt_identity())
-    s = q.get_statement(conn, statement_id)
-    if not s:
-        return jsonify({"error": "not found"}), 404
-
-    # Ownership: statement → bearing → course → user
-    b = q.get_bearing(conn, s["bearing_id"])
-    if not b or not q.get_course(conn, b["course_id"], user_id):
-        return jsonify({"error": "not found"}), 404
-
-    body = request.get_json(force=True)
-    updates = {}
-    if "observed" in body:
-        updates["observed"] = body["observed"]
-    if "text" in body:
-        updates["text"] = body["text"]
-
-    s = q.update_statement(conn, statement_id, **updates)
-    return jsonify(_statement_dict(s))
-
-
-# ── Canvas endpoints ──────────────────────────────────────────────────────────
-
-def _canvas_creds(user) -> tuple[str, str]:
-    return user["canvas_access_token"] or "", user["canvas_base_url"].rstrip("/")
-
-
-@app.post("/api/canvas/assignment")
-@jwt_required()
-def canvas_assignment():
-    conn = get_db()
-    user = q.get_user(conn, int(get_jwt_identity()))
-    body = request.get_json(force=True)
-    draft = body.get("assignment")
-    if not draft:
-        return jsonify({"error": "no assignment"}), 400
-
-    token, base_url = _canvas_creds(user)
-    canvas_course_id = body.get("canvas_course_id")
-
-    if not token:
-        return jsonify({"error": "No Canvas access token — please sign in via Canvas OAuth"}), 503
-    if not canvas_course_id:
-        return jsonify({"error": "canvas_course_id required"}), 400
-
-    canvas_payload = {
-        "assignment": {
-            "name": draft.get("title", "Untitled Assignment"),
-            "description": draft.get("description", ""),
-            "points_possible": draft.get("points_possible", 100),
-            "submission_types": draft.get("submission_types", ["online_text_entry"]),
-            "published": False,
-        }
-    }
-
-    url = f"{base_url}/api/v1/courses/{canvas_course_id}/assignments"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-    try:
-        resp = requests.post(url, json=canvas_payload, headers=headers, timeout=15)
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        return jsonify({"error": f"Canvas API error: {e.response.status_code}"}), 502
-    except requests.RequestException as e:
-        return jsonify({"error": f"Canvas request failed: {e}"}), 502
-
-    data = resp.json()
-    canvas_id = str(data.get("id", ""))
-    html_url = data.get("html_url", "")
-
-    # Update local assignment record if id provided
-    assignment_id = body.get("assignment_id")
-    if assignment_id:
-        q.update_assignment(
-            conn, str(assignment_id), user["id"],
-            canvas_assignment_id=canvas_id,
-            canvas_html_url=html_url,
-        )
-
-    return jsonify({"canvas_id": canvas_id, "html_url": html_url})
-
-
-@app.get("/api/canvas/assignments")
-@jwt_required()
-def canvas_list_assignments():
-    conn = get_db()
-    user = q.get_user(conn, int(get_jwt_identity()))
-    token, base_url = _canvas_creds(user)
-    course_id = request.args.get("canvas_course_id")
-
-    if not token:
-        return jsonify({"error": "No Canvas access token"}), 503
-    if not course_id:
-        return jsonify({"error": "canvas_course_id required"}), 400
-
-    url = f"{base_url}/api/v1/courses/{course_id}/assignments"
-    headers = {"Authorization": f"Bearer {token}"}
-    params = {"per_page": 100, "include[]": "rubric"}
-
-    try:
-        resp = requests.get(url, headers=headers, params=params, timeout=15)
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        return jsonify({"error": f"Canvas API error: {e.response.status_code}"}), 502
-    except requests.RequestException as e:
-        return jsonify({"error": f"Canvas request failed: {e}"}), 502
-
-    simplified = [
-        {
-            "id": a.get("id"),
-            "name": a.get("name"),
-            "points_possible": a.get("points_possible"),
-            "html_url": a.get("html_url"),
-            "has_rubric": bool(a.get("rubric")),
-        }
-        for a in resp.json()
-        if isinstance(a, dict)
-    ]
-    return jsonify({"assignments": simplified})
-
-
-@app.get("/api/canvas/courses")
-@jwt_required()
-def canvas_list_courses():
-    """List Canvas courses the user teaches."""
-    conn = get_db()
-    user = q.get_user(conn, int(get_jwt_identity()))
-    token, base_url = _canvas_creds(user)
-
-    if not token:
-        return jsonify({"error": "No Canvas access token"}), 503
-
-    url = f"{base_url}/api/v1/courses"
-    headers = {"Authorization": f"Bearer {token}"}
-    params = {"enrollment_type": "teacher", "per_page": 100, "state[]": "available"}
-
-    try:
-        resp = requests.get(url, headers=headers, params=params, timeout=15)
-        resp.raise_for_status()
-    except requests.HTTPError as e:
-        return jsonify({"error": f"Canvas API error: {e.response.status_code}"}), 502
-    except requests.RequestException as e:
-        return jsonify({"error": f"Canvas request failed: {e}"}), 502
-
-    simplified = [
-        {
-            "id": c.get("id"),
-            "name": c.get("name"),
-            "course_code": c.get("course_code"),
-        }
-        for c in resp.json()
-        if isinstance(c, dict)
-    ]
-    return jsonify({"courses": simplified})
 
 
 if __name__ == "__main__":
