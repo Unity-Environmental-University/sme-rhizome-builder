@@ -12,7 +12,7 @@ logRoutes.get("/:assignmentId", async (c) => {
   const assignmentId = c.req.param("assignmentId")
   if (!await q.getAssignment(sql, assignmentId, userId)) return c.json({ error: "Not found" }, 404)
   const entries = await q.listLog(sql, "assignment", assignmentId)
-  return c.json(entries)
+  return c.json({ entries })
 })
 
 logRoutes.post("/:assignmentId", async (c) => {

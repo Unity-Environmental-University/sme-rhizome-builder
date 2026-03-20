@@ -22,7 +22,7 @@
     outcomes: string[];
     outcomeRows: OutcomeRow[];
   };
-  type View = { kind: 'course' } | { kind: 'module'; week: number } | { kind: 'editor'; week: number; assignmentId: string; isNew?: boolean };
+  type View = { kind: 'course' } | { kind: 'module'; week: number } | { kind: 'editor'; week: number; assignmentId: string; isNew?: boolean } | { kind: 'designer' };
 
   export let course: CourseShape;
   export let modules: ModuleShape[];
@@ -31,6 +31,7 @@
   const dispatch = createEventDispatcher<{
     selectCourse: void;
     selectModule: number;
+    selectDesigner: void;
   }>();
 </script>
 
@@ -67,6 +68,16 @@
       </li>
     {/each}
   </ol>
+
+  <button
+    class="course-nav__designer"
+    class:active={view.kind === 'designer'}
+    on:click={() => dispatch('selectDesigner')}
+    aria-label="Learning designer view"
+    title="Learning designer — bearings"
+  >
+    ⚙ designer
+  </button>
 </nav>
 
 <style lang="scss">
@@ -163,6 +174,30 @@
     font-size: 0.82rem;
     color: $una-dark-1;
     line-height: 1.3;
+  }
+
+  .course-nav__designer {
+    margin-top: auto;
+    padding: $space-sm $space-lg;
+    background: none;
+    border: none;
+    border-top: 1px solid $color-border;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    text-align: left;
+    font-family: $font-mono;
+    font-size: 0.68rem;
+    color: $una-mid-green;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: border-color 240ms ease, background 240ms ease;
+    width: 100%;
+
+    &:hover { background: $una-light-green; }
+    &.active {
+      border-left-color: $una-gold;
+      background: $una-light-green;
+    }
   }
 
   .course-nav__indicator {

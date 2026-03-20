@@ -7,6 +7,7 @@
   import ModuleView from './ModuleView.svelte';
   import AssignmentPane from './AssignmentPane.svelte';
   import ThreadSidebar from './ThreadSidebar.svelte';
+  import DesignerView from './DesignerView.svelte';
   import { sidebarOpen } from '../stores/threads';
 
   type OutcomeRow = { id: number; text: string; position: number };
@@ -32,7 +33,8 @@
   type View =
     | { kind: 'course' }
     | { kind: 'module'; week: number }
-    | { kind: 'editor'; week: number; assignmentId: string; isNew?: boolean };
+    | { kind: 'editor'; week: number; assignmentId: string; isNew?: boolean }
+    | { kind: 'designer' };
 
   let course: CourseShape | null = null;
   let modules: ModuleShape[] = [];
@@ -96,10 +98,15 @@
     view = { kind: 'course' };
   }
 
+  function selectDesigner() {
+    view = { kind: 'designer' };
+  }
+
   $: gridCols = $sidebarOpen ? '260px 1fr 320px' : '260px 1fr';
 
   function getViewWeek(v: View): number | null {
-    return v.kind === 'module' ? v.week : v.kind === 'editor' ? v.week : null;
+    if (v.kind === 'module' || v.kind === 'editor') return v.week;
+    return null;
   }
 
   $: viewWeek = getViewWeek(view);
@@ -178,6 +185,7 @@
     {view}
     on:selectCourse={selectCourse}
     on:selectModule={(e) => selectModule(e.detail)}
+    on:selectDesigner={selectDesigner}
   />
 
   <main class="course-main" class:editor-active={view.kind === 'editor'}>
@@ -195,6 +203,10 @@
           on:newAssignment={() => newAssignment(activeModule.week)}
           on:assignmentsReordered={handleAssignmentsReordered}
         />
+      </div>
+    {:else if view.kind === 'designer'}
+      <div class="course-main__viewport" in:fade={{ duration: 200 }}>
+        <DesignerView {course} />
       </div>
     {:else if view.kind === 'editor'}
       <AssignmentPane

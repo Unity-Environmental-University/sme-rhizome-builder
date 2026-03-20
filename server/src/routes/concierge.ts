@@ -4,6 +4,7 @@ import * as q from "../db/queries.js"
 import { jwtRequired, type AuthEnv } from "../auth.js"
 import { callAi } from "../ai/index.js"
 import { buildSystemPrompt, CONCIERGE_DECK } from "../ai/prompts.js"
+import { runBearingEval } from "../ai/bearingEval.js"
 
 export const conciergeRoutes = new Hono<AuthEnv>()
 conciergeRoutes.use("*", jwtRequired)
@@ -80,6 +81,22 @@ conciergeRoutes.post("/:assignmentId", async (c) => {
     JSON.stringify({ comment_id, text: responseText, source: "agent" }),
     Number(anchor_id),
   )
+
+  // Fire bearing eval without blocking — writes observed + rolls up likelihood
+  if (courseData?.bearings && draftHtml) {
+    type BearingWithStatements = { id: number; text: string; weight: number; likelihood: number; statements: { id: number; text: string; observed: boolean | null }[] }
+    const bearings = (courseData.bearings as BearingWithStatements[]).filter(b => b.statements.length > 0)
+    if (bearings.length) {
+      runBearingEval({
+        sql,
+        bearings,
+        draftHtml,
+        endpoint: resolvedEndpoint,
+        apiKey: api_key ?? process.env.ANTHROPIC_API_KEY,
+        model,
+      }).catch(e => console.error("[concierge] bearingEval failed:", e))
+    }
+  }
 
   return c.json(note, 201)
 })
