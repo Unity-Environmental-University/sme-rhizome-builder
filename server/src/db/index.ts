@@ -1,22 +1,37 @@
 /**
- * SQLite connection — better-sqlite3, synchronous, request-scoped via closure.
- * Same DB file as the Flask backend. Schema lives in backend/schema.sql.
+ * PostgreSQL connection via postgres.js.
+ * Configure via environment variables — see .env.example.
+ *
+ * If DATABASE_URL is not set, the server will refuse to start with a clear message.
  */
 
-import Database from "better-sqlite3"
-import { join, dirname } from "node:path"
-import { fileURLToPath } from "node:url"
+import postgres from "postgres"
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const DB_PATH = join(__dirname, "../../../backend/rhizome.db")
+const DATABASE_URL = process.env.DATABASE_URL
 
-let _db: Database.Database | null = null
+if (!DATABASE_URL) {
+  console.error(`
+╔══════════════════════════════════════════════════════════╗
+║           DATABASE NOT CONFIGURED                        ║
+╠══════════════════════════════════════════════════════════╣
+║                                                          ║
+║  Set DATABASE_URL in your environment or .env file:      ║
+║                                                          ║
+║  DATABASE_URL=postgres://localhost/rhizome-builder       ║
+║                                                          ║
+║  PostgreSQL 17 is expected (brew services postgresql@17) ║
+║  Run the schema:  psql rhizome-builder < schema.sql      ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+`)
+  process.exit(1)
+}
 
-export function getDb(): Database.Database {
-  if (!_db) {
-    _db = new Database(DB_PATH)
-    _db.pragma("journal_mode = WAL")
-    _db.pragma("foreign_keys = ON")
+let _sql: ReturnType<typeof postgres> | null = null
+
+export function getSql(): ReturnType<typeof postgres> {
+  if (!_sql) {
+    _sql = postgres(DATABASE_URL!, { transform: postgres.camel })
   }
-  return _db
+  return _sql
 }

@@ -1,24 +1,28 @@
 /**
  * All SQL as named parameterized functions.
- * The garden wall: SQL lives here.
- * Returns plain objects (better-sqlite3 rows with .toJSON() applied).
+ * The garden wall: SQL lives here. Business logic lives in routes.
+ * Uses postgres.js tagged template literals — no string interpolation.
  */
 
-import type Database from "better-sqlite3"
+import type postgres from "postgres"
 import { v4 as uuidv4 } from "uuid"
+
+type Sql = postgres.Sql
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
-export function getUser(db: Database.Database, userId: number) {
-  return db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as Record<string, unknown> | undefined
+export async function getUser(sql: Sql, userId: number) {
+  const [row] = await sql`SELECT * FROM users WHERE id = ${userId}`
+  return row ?? null
 }
 
-export function getUserByCanvasId(db: Database.Database, canvasUserId: string) {
-  return db.prepare("SELECT * FROM users WHERE canvas_user_id = ?").get(canvasUserId) as Record<string, unknown> | undefined
+export async function getUserByCanvasId(sql: Sql, canvasUserId: string) {
+  const [row] = await sql`SELECT * FROM users WHERE canvas_user_id = ${canvasUserId}`
+  return row ?? null
 }
 
-export function upsertUser(
-  db: Database.Database,
+export async function upsertUser(
+  sql: Sql,
   canvasUserId: string,
   name: string,
   email: string,
@@ -27,44 +31,44 @@ export function upsertUser(
   tokenExpiresAt?: string,
   canvasBaseUrl = "https://unity.instructure.com",
 ) {
-  const existing = getUserByCanvasId(db, canvasUserId)
-  if (existing) {
-    db.prepare(
-      `UPDATE users SET name=?, email=?, canvas_access_token=?,
-       canvas_refresh_token=?, token_expires_at=?, canvas_base_url=?
-       WHERE canvas_user_id=?`
-    ).run(name, email, canvasAccessToken ?? null, canvasRefreshToken ?? null, tokenExpiresAt ?? null, canvasBaseUrl, canvasUserId)
-  } else {
-    db.prepare(
-      `INSERT INTO users (canvas_user_id, name, email, canvas_access_token,
-       canvas_refresh_token, token_expires_at, canvas_base_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(canvasUserId, name, email, canvasAccessToken ?? null, canvasRefreshToken ?? null, tokenExpiresAt ?? null, canvasBaseUrl)
-  }
-  return getUserByCanvasId(db, canvasUserId)!
+  const [row] = await sql`
+    INSERT INTO users (canvas_user_id, name, email, canvas_access_token,
+      canvas_refresh_token, token_expires_at, canvas_base_url)
+    VALUES (${canvasUserId}, ${name}, ${email}, ${canvasAccessToken ?? null},
+      ${canvasRefreshToken ?? null}, ${tokenExpiresAt ?? null}, ${canvasBaseUrl})
+    ON CONFLICT (canvas_user_id) DO UPDATE SET
+      name = EXCLUDED.name,
+      email = EXCLUDED.email,
+      canvas_access_token = EXCLUDED.canvas_access_token,
+      canvas_refresh_token = EXCLUDED.canvas_refresh_token,
+      token_expires_at = EXCLUDED.token_expires_at,
+      canvas_base_url = EXCLUDED.canvas_base_url
+    RETURNING *`
+  return row
 }
 
-export function createDemoUser(db: Database.Database) {
-  const existing = getUserByCanvasId(db, "demo")
-  if (existing) return existing
-  db.prepare(
-    "INSERT INTO users (canvas_user_id, name, email) VALUES ('demo', 'Demo User', 'demo@localhost')"
-  ).run()
-  return getUserByCanvasId(db, "demo")!
+export async function createDemoUser(sql: Sql) {
+  const [row] = await sql`
+    INSERT INTO users (canvas_user_id, name, email)
+    VALUES ('demo', 'Demo User', 'demo@localhost')
+    ON CONFLICT (canvas_user_id) DO UPDATE SET name = EXCLUDED.name
+    RETURNING *`
+  return row
 }
 
 // ── Courses ───────────────────────────────────────────────────────────────────
 
-export function getCourse(db: Database.Database, courseId: number, userId: number) {
-  return db.prepare("SELECT * FROM courses WHERE id = ? AND user_id = ?").get(courseId, userId) as Record<string, unknown> | undefined
+export async function getCourse(sql: Sql, courseId: number, userId: number) {
+  const [row] = await sql`SELECT * FROM courses WHERE id = ${courseId} AND user_id = ${userId}`
+  return row ?? null
 }
 
-export function listCourses(db: Database.Database, userId: number) {
-  return db.prepare("SELECT * FROM courses WHERE user_id = ? ORDER BY created_at DESC").all(userId) as Record<string, unknown>[]
+export async function listCourses(sql: Sql, userId: number) {
+  return sql`SELECT * FROM courses WHERE user_id = ${userId} ORDER BY created_at DESC`
 }
 
-export function createCourse(
-  db: Database.Database,
+export async function createCourse(
+  sql: Sql,
   userId: number,
   courseCode = "",
   courseTitle = "",
@@ -72,64 +76,68 @@ export function createCourse(
   canvasCourseId?: string,
   periodType = "Week",
 ) {
-  const result = db.prepare(
-    `INSERT INTO courses (user_id, course_code, course_title, learning_outcomes, canvas_course_id, period_type)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(userId, courseCode, courseTitle, learningOutcomes, canvasCourseId ?? null, periodType)
-  return db.prepare("SELECT * FROM courses WHERE id = ?").get(result.lastInsertRowid) as Record<string, unknown>
+  const [row] = await sql`
+    INSERT INTO courses (user_id, course_code, course_title, learning_outcomes, canvas_course_id, period_type)
+    VALUES (${userId}, ${courseCode}, ${courseTitle}, ${learningOutcomes}, ${canvasCourseId ?? null}, ${periodType})
+    RETURNING *`
+  return row
 }
 
-export function updateCourse(
-  db: Database.Database,
+export async function updateCourse(
+  sql: Sql,
   courseId: number,
   courseCode: string,
   courseTitle: string,
   learningOutcomes: string,
   canvasCourseId?: string,
 ) {
-  db.prepare(
-    `UPDATE courses SET course_code=?, course_title=?, learning_outcomes=?, canvas_course_id=? WHERE id=?`
-  ).run(courseCode, courseTitle, learningOutcomes, canvasCourseId ?? null, courseId)
-  return db.prepare("SELECT * FROM courses WHERE id = ?").get(courseId) as Record<string, unknown>
+  const [row] = await sql`
+    UPDATE courses SET
+      course_code = ${courseCode},
+      course_title = ${courseTitle},
+      learning_outcomes = ${learningOutcomes},
+      canvas_course_id = ${canvasCourseId ?? null}
+    WHERE id = ${courseId}
+    RETURNING *`
+  return row
 }
 
-export function listLearningOutcomes(db: Database.Database, courseId: number) {
-  return db.prepare("SELECT * FROM learning_outcomes WHERE course_id = ? ORDER BY position").all(courseId) as Record<string, unknown>[]
+export async function listLearningOutcomes(sql: Sql, courseId: number) {
+  return sql`SELECT * FROM learning_outcomes WHERE course_id = ${courseId} ORDER BY position`
 }
 
-export function getLearningOutcomesByIds(db: Database.Database, ids: number[], courseId: number) {
+export async function getLearningOutcomesByIds(sql: Sql, ids: number[], courseId: number) {
   if (!ids.length) return []
-  const placeholders = ids.map(() => "?").join(",")
-  return db.prepare(
-    `SELECT * FROM learning_outcomes WHERE id IN (${placeholders}) AND course_id = ?`
-  ).all(...ids, courseId) as Record<string, unknown>[]
+  return sql`SELECT * FROM learning_outcomes WHERE id = ANY(${ids}) AND course_id = ${courseId}`
 }
 
-export function createLearningOutcome(
-  db: Database.Database,
+export async function createLearningOutcome(
+  sql: Sql,
   courseId: number,
   text: string,
   position: number,
   canvasOutcomeId?: string,
 ) {
-  const result = db.prepare(
-    "INSERT INTO learning_outcomes (course_id, text, position, canvas_outcome_id) VALUES (?, ?, ?, ?)"
-  ).run(courseId, text, position, canvasOutcomeId ?? null)
-  return db.prepare("SELECT * FROM learning_outcomes WHERE id = ?").get(result.lastInsertRowid) as Record<string, unknown>
+  const [row] = await sql`
+    INSERT INTO learning_outcomes (course_id, text, position, canvas_outcome_id)
+    VALUES (${courseId}, ${text}, ${position}, ${canvasOutcomeId ?? null})
+    RETURNING *`
+  return row
 }
 
 // ── Modules ───────────────────────────────────────────────────────────────────
 
-export function listModules(db: Database.Database, courseId: number) {
-  return db.prepare("SELECT * FROM modules WHERE course_id = ? ORDER BY position").all(courseId) as Record<string, unknown>[]
+export async function listModules(sql: Sql, courseId: number) {
+  return sql`SELECT * FROM modules WHERE course_id = ${courseId} ORDER BY position`
 }
 
-export function getModule(db: Database.Database, moduleId: number, courseId: number) {
-  return db.prepare("SELECT * FROM modules WHERE id = ? AND course_id = ?").get(moduleId, courseId) as Record<string, unknown> | undefined
+export async function getModule(sql: Sql, moduleId: number, courseId: number) {
+  const [row] = await sql`SELECT * FROM modules WHERE id = ${moduleId} AND course_id = ${courseId}`
+  return row ?? null
 }
 
-export function createModule(
-  db: Database.Database,
+export async function createModule(
+  sql: Sql,
   courseId: number,
   title: string,
   description = "",
@@ -137,55 +145,57 @@ export function createModule(
   outcomeIds: number[] = [],
   canvasModuleId?: string,
 ) {
-  const result = db.prepare(
-    `INSERT INTO modules (course_id, canvas_module_id, title, description, position, outcome_ids)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(courseId, canvasModuleId ?? null, title, description, position, JSON.stringify(outcomeIds))
-  return db.prepare("SELECT * FROM modules WHERE id = ?").get(result.lastInsertRowid) as Record<string, unknown>
+  const [row] = await sql`
+    INSERT INTO modules (course_id, canvas_module_id, title, description, position, outcome_ids)
+    VALUES (${courseId}, ${canvasModuleId ?? null}, ${title}, ${description}, ${position}, ${sql.json(outcomeIds)})
+    RETURNING *`
+  return row
 }
 
-export function updateModule(
-  db: Database.Database,
+export async function updateModule(
+  sql: Sql,
   moduleId: number,
   courseId: number,
   fields: Partial<{ title: string; description: string; position: number; outcome_ids: number[]; canvas_module_id: string }>,
 ) {
-  const allowed = ["title", "description", "position", "outcome_ids", "canvas_module_id"] as const
-  const updates: Record<string, unknown> = {}
-  for (const key of allowed) {
-    if (key in fields) {
-      updates[key] = key === "outcome_ids" ? JSON.stringify(fields[key]) : fields[key]
-    }
-  }
-  if (!Object.keys(updates).length) return getModule(db, moduleId, courseId)
-  const setClause = Object.keys(updates).map(k => `${k} = ?`).join(", ")
-  db.prepare(`UPDATE modules SET ${setClause} WHERE id = ? AND course_id = ?`).run(...Object.values(updates), moduleId, courseId)
-  return getModule(db, moduleId, courseId)
+  const sets: string[] = []
+  const vals: unknown[] = []
+  if (fields.title !== undefined)            { sets.push("title = $" + (vals.push(fields.title)));            }
+  if (fields.description !== undefined)      { sets.push("description = $" + (vals.push(fields.description))); }
+  if (fields.position !== undefined)         { sets.push("position = $" + (vals.push(fields.position)));       }
+  if (fields.outcome_ids !== undefined)      { sets.push("outcome_ids = $" + (vals.push(JSON.stringify(fields.outcome_ids)))); }
+  if (fields.canvas_module_id !== undefined) { sets.push("canvas_module_id = $" + (vals.push(fields.canvas_module_id))); }
+  if (!sets.length) return getModule(sql, moduleId, courseId)
+  // Use unsafe for dynamic SET clause — values are still parameterized
+  const [row] = await sql.unsafe(
+    `UPDATE modules SET ${sets.join(", ")} WHERE id = $${vals.push(moduleId)} AND course_id = $${vals.push(courseId)} RETURNING *`,
+    vals as any[],
+  )
+  return row ?? null
 }
 
 // ── Assignments ───────────────────────────────────────────────────────────────
 
-export function getAssignment(db: Database.Database, assignmentId: string, userId: number) {
-  return db.prepare("SELECT * FROM assignments WHERE id = ? AND user_id = ?").get(assignmentId, userId) as Record<string, unknown> | undefined
+export async function getAssignment(sql: Sql, assignmentId: string, userId: number) {
+  const [row] = await sql`SELECT * FROM assignments WHERE id = ${assignmentId} AND user_id = ${userId}`
+  return row ?? null
 }
 
-export function listAssignments(db: Database.Database, courseId: number, userId: number) {
-  return db.prepare(
-    `SELECT * FROM assignments WHERE course_id = ? AND user_id = ?
-     ORDER BY CASE WHEN position IS NULL THEN 1 ELSE 0 END, position, created_at`
-  ).all(courseId, userId) as Record<string, unknown>[]
+export async function listAssignments(sql: Sql, courseId: number, userId: number) {
+  return sql`
+    SELECT * FROM assignments WHERE course_id = ${courseId} AND user_id = ${userId}
+    ORDER BY CASE WHEN position IS NULL THEN 1 ELSE 0 END, position, created_at`
 }
 
-export function nextPositionInModule(db: Database.Database, courseId: number, userId: number, moduleLabel: string) {
-  const row = db.prepare(
-    `SELECT MAX(position) as max_pos FROM assignments
-     WHERE course_id = ? AND user_id = ? AND module_label = ? AND position IS NOT NULL`
-  ).get(courseId, userId, moduleLabel) as { max_pos: number | null }
-  return row.max_pos != null ? row.max_pos + 1 : 0
+export async function nextPositionInModule(sql: Sql, courseId: number, userId: number, moduleLabel: string) {
+  const [row] = await sql`
+    SELECT MAX(position) AS max_pos FROM assignments
+    WHERE course_id = ${courseId} AND user_id = ${userId} AND module_label = ${moduleLabel} AND position IS NOT NULL`
+  return row?.maxPos != null ? (row.maxPos as number) + 1 : 0
 }
 
-export function createAssignment(
-  db: Database.Database,
+export async function createAssignment(
+  sql: Sql,
   userId: number,
   courseId: number,
   moduleLabel: string,
@@ -193,60 +203,69 @@ export function createAssignment(
   position?: number,
 ) {
   const id = uuidv4()
-  db.prepare(
-    "INSERT INTO assignments (id, user_id, course_id, module_label, title, position) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, userId, courseId, moduleLabel, title, position ?? null)
-  return getAssignment(db, id, userId)!
+  const [row] = await sql`
+    INSERT INTO assignments (id, user_id, course_id, module_label, title, position)
+    VALUES (${id}, ${userId}, ${courseId}, ${moduleLabel}, ${title}, ${position ?? null})
+    RETURNING *`
+  return row
 }
 
-export function updateAssignment(
-  db: Database.Database,
+export async function updateAssignment(
+  sql: Sql,
   assignmentId: string,
   userId: number,
   fields: Partial<{ title: string; module_label: string; position: number }>,
 ) {
-  const allowed = ["title", "module_label", "position"] as const
-  const updates: Record<string, unknown> = {}
-  for (const key of allowed) { if (key in fields) updates[key] = fields[key] }
-  if (!Object.keys(updates).length) return getAssignment(db, assignmentId, userId)
-  const setClause = Object.keys(updates).map(k => `${k} = ?`).join(", ")
-  db.prepare(`UPDATE assignments SET ${setClause} WHERE id = ? AND user_id = ?`).run(...Object.values(updates), assignmentId, userId)
-  return getAssignment(db, assignmentId, userId)
+  const sets: string[] = []
+  const vals: unknown[] = []
+  if (fields.title !== undefined)        { sets.push("title = $" + vals.push(fields.title)); }
+  if (fields.module_label !== undefined) { sets.push("module_label = $" + vals.push(fields.module_label)); }
+  if (fields.position !== undefined)     { sets.push("position = $" + vals.push(fields.position)); }
+  if (!sets.length) return getAssignment(sql, assignmentId, userId)
+  const [row] = await sql.unsafe(
+    `UPDATE assignments SET ${sets.join(", ")} WHERE id = $${vals.push(assignmentId)} AND user_id = $${vals.push(userId)} RETURNING *`,
+    vals as any[],
+  )
+  return row ?? null
 }
 
 // ── Snapshots ─────────────────────────────────────────────────────────────────
 
-export function createSnapshot(
-  db: Database.Database,
+export async function createSnapshot(
+  sql: Sql,
   assignmentId: string,
   userId: number,
   content: Record<string, unknown>,
   label?: string,
 ) {
-  const result = db.prepare(
-    "INSERT INTO snapshots (assignment_id, user_id, content, label) VALUES (?, ?, ?, ?)"
-  ).run(assignmentId, userId, JSON.stringify(content), label ?? null)
-  return db.prepare("SELECT * FROM snapshots WHERE id = ?").get(result.lastInsertRowid) as Record<string, unknown>
+  const [row] = await sql`
+    INSERT INTO snapshots (assignment_id, user_id, content, label)
+    VALUES (${assignmentId}, ${userId}, ${sql.json(content as never)}, ${label ?? null})
+    RETURNING *`
+  return row
 }
 
-export function listSnapshots(db: Database.Database, assignmentId: string) {
-  return db.prepare("SELECT * FROM snapshots WHERE assignment_id = ? ORDER BY snapshot_at").all(assignmentId) as Record<string, unknown>[]
+export async function listSnapshots(sql: Sql, assignmentId: string) {
+  return sql`SELECT * FROM snapshots WHERE assignment_id = ${assignmentId} ORDER BY snapshot_at`
 }
 
-export function latestSnapshot(db: Database.Database, assignmentId: string) {
-  return db.prepare("SELECT * FROM snapshots WHERE assignment_id = ? ORDER BY snapshot_at DESC LIMIT 1").get(assignmentId) as Record<string, unknown> | undefined
+export async function latestSnapshot(sql: Sql, assignmentId: string) {
+  const [row] = await sql`
+    SELECT * FROM snapshots WHERE assignment_id = ${assignmentId}
+    ORDER BY snapshot_at DESC LIMIT 1`
+  return row ?? null
 }
 
 // ── Log ───────────────────────────────────────────────────────────────────────
 
-export function listLog(db: Database.Database, contextType: string, contextId: string) {
-  return db.prepare(
-    "SELECT * FROM log_entries WHERE context_type = ? AND context_id = ? ORDER BY created_at"
-  ).all(contextType, contextId) as Record<string, unknown>[]
+export async function listLog(sql: Sql, contextType: string, contextId: string) {
+  return sql`
+    SELECT * FROM log_entries WHERE context_type = ${contextType} AND context_id = ${contextId}
+    ORDER BY created_at`
 }
 
-export function appendLog(
-  db: Database.Database,
+export async function appendLog(
+  sql: Sql,
   userId: number,
   contextType: string,
   contextId: string,
@@ -254,79 +273,95 @@ export function appendLog(
   content = "",
   repliedTo?: number,
 ) {
-  const result = db.prepare(
-    `INSERT INTO log_entries (user_id, context_type, context_id, action_type, content, replied_to)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(userId, contextType, contextId, actionType, content, repliedTo ?? null)
-  return db.prepare("SELECT * FROM log_entries WHERE id = ?").get(result.lastInsertRowid) as Record<string, unknown>
+  const [row] = await sql`
+    INSERT INTO log_entries (user_id, context_type, context_id, action_type, content, replied_to)
+    VALUES (${userId}, ${contextType}, ${contextId}, ${actionType}, ${content}, ${repliedTo ?? null})
+    RETURNING *`
+  return row
 }
 
-export function getLogEntry(db: Database.Database, entryId: number) {
-  return db.prepare("SELECT * FROM log_entries WHERE id = ?").get(entryId) as Record<string, unknown> | undefined
+export async function getLogEntry(sql: Sql, entryId: number) {
+  const [row] = await sql`SELECT * FROM log_entries WHERE id = ${entryId}`
+  return row ?? null
 }
 
 // ── Bearings ──────────────────────────────────────────────────────────────────
 
-export function listBearings(db: Database.Database, courseId: number) {
-  return db.prepare("SELECT * FROM bearings WHERE course_id = ? ORDER BY created_at").all(courseId) as Record<string, unknown>[]
+export async function listBearings(sql: Sql, courseId: number) {
+  return sql`SELECT * FROM bearings WHERE course_id = ${courseId} ORDER BY created_at`
 }
 
-export function getBearing(db: Database.Database, bearingId: number) {
-  return db.prepare("SELECT * FROM bearings WHERE id = ?").get(bearingId) as Record<string, unknown> | undefined
+export async function getBearing(sql: Sql, bearingId: number) {
+  const [row] = await sql`SELECT * FROM bearings WHERE id = ${bearingId}`
+  return row ?? null
 }
 
-export function createBearing(
-  db: Database.Database,
+export async function createBearing(
+  sql: Sql,
   courseId: number,
   text: string,
   weight = 0.5,
   likelihood = 0.5,
   learningOutcomeId?: number,
 ) {
-  const result = db.prepare(
-    `INSERT INTO bearings (course_id, learning_outcome_id, text, weight, likelihood)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(courseId, learningOutcomeId ?? null, text, weight, likelihood)
-  return db.prepare("SELECT * FROM bearings WHERE id = ?").get(result.lastInsertRowid) as Record<string, unknown>
+  const [row] = await sql`
+    INSERT INTO bearings (course_id, learning_outcome_id, text, weight, likelihood)
+    VALUES (${courseId}, ${learningOutcomeId ?? null}, ${text}, ${weight}, ${likelihood})
+    RETURNING *`
+  return row
 }
 
-export function updateBearing(
-  db: Database.Database,
+export async function updateBearing(
+  sql: Sql,
   bearingId: number,
   fields: Partial<{ text: string; weight: number; likelihood: number }>,
 ) {
-  const allowed = ["text", "weight", "likelihood"] as const
-  const updates: Record<string, unknown> = {}
-  for (const key of allowed) { if (key in fields) updates[key] = fields[key] }
-  if (!Object.keys(updates).length) return getBearing(db, bearingId)
-  const setClause = Object.keys(updates).map(k => `${k} = ?`).join(", ")
-  db.prepare(`UPDATE bearings SET ${setClause}, updated_at=datetime('now') WHERE id = ?`).run(...Object.values(updates), bearingId)
-  return getBearing(db, bearingId)
+  const sets: string[] = []
+  const vals: unknown[] = []
+  if (fields.text !== undefined)       { sets.push("text = $" + vals.push(fields.text)); }
+  if (fields.weight !== undefined)     { sets.push("weight = $" + vals.push(fields.weight)); }
+  if (fields.likelihood !== undefined) { sets.push("likelihood = $" + vals.push(fields.likelihood)); }
+  if (!sets.length) return getBearing(sql, bearingId)
+  sets.push("updated_at = now()")
+  const [row] = await sql.unsafe(
+    `UPDATE bearings SET ${sets.join(", ")} WHERE id = $${vals.push(bearingId)} RETURNING *`,
+    vals as any[],
+  )
+  return row ?? null
 }
 
-export function deleteBearing(db: Database.Database, bearingId: number) {
-  db.prepare("DELETE FROM bearings WHERE id = ?").run(bearingId)
+export async function deleteBearing(sql: Sql, bearingId: number) {
+  await sql`DELETE FROM bearings WHERE id = ${bearingId}`
 }
 
-export function listStatements(db: Database.Database, bearingId: number) {
-  return db.prepare("SELECT * FROM bearing_statements WHERE bearing_id = ? ORDER BY created_at").all(bearingId) as Record<string, unknown>[]
+export async function listStatements(sql: Sql, bearingId: number) {
+  return sql`SELECT * FROM bearing_statements WHERE bearing_id = ${bearingId} ORDER BY created_at`
 }
 
-export function getStatement(db: Database.Database, statementId: number) {
-  return db.prepare("SELECT * FROM bearing_statements WHERE id = ?").get(statementId) as Record<string, unknown> | undefined
+export async function getStatement(sql: Sql, statementId: number) {
+  const [row] = await sql`SELECT * FROM bearing_statements WHERE id = ${statementId}`
+  return row ?? null
 }
 
-export function createStatement(db: Database.Database, bearingId: number, text: string) {
-  const result = db.prepare("INSERT INTO bearing_statements (bearing_id, text) VALUES (?, ?)").run(bearingId, text)
-  return db.prepare("SELECT * FROM bearing_statements WHERE id = ?").get(result.lastInsertRowid) as Record<string, unknown>
+export async function createStatement(sql: Sql, bearingId: number, text: string) {
+  const [row] = await sql`
+    INSERT INTO bearing_statements (bearing_id, text) VALUES (${bearingId}, ${text}) RETURNING *`
+  return row
 }
 
-export function updateStatement(db: Database.Database, statementId: number, fields: Partial<{ text: string; observed: number | null }>) {
-  const allowed = ["text", "observed"] as const
-  const updates: Record<string, unknown> = {}
-  for (const key of allowed) { if (key in fields) updates[key] = fields[key] }
-  if (!Object.keys(updates).length) return getStatement(db, statementId)
-  const setClause = Object.keys(updates).map(k => `${k} = ?`).join(", ")
-  db.prepare(`UPDATE bearing_statements SET ${setClause} WHERE id = ?`).run(...Object.values(updates), statementId)
-  return getStatement(db, statementId)
+export async function updateStatement(
+  sql: Sql,
+  statementId: number,
+  fields: Partial<{ text: string; observed: boolean | null }>,
+) {
+  const sets: string[] = []
+  const vals: unknown[] = []
+  if (fields.text !== undefined)     { sets.push("text = $" + vals.push(fields.text)); }
+  if ("observed" in fields)          { sets.push("observed = $" + vals.push(fields.observed ?? null)); }
+  if (!sets.length) return getStatement(sql, statementId)
+  const [row] = await sql.unsafe(
+    `UPDATE bearing_statements SET ${sets.join(", ")} WHERE id = $${vals.push(statementId)} RETURNING *`,
+    vals as any[],
+  )
+  return row ?? null
 }

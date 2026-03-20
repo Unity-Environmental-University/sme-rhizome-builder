@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { setCookie, deleteCookie } from "hono/cookie"
-import { getDb } from "../db/index.js"
-import { getUserByCanvasId, createDemoUser, getUser } from "../db/queries.js"
+import { getSql } from "../db/index.js"
+import { getUserByCanvasId, createDemoUser, getUser, upsertUser } from "../db/queries.js"
 import { signToken, jwtRequired, type AuthEnv } from "../auth.js"
 
 const CANVAS_CLIENT_ID = process.env.CANVAS_CLIENT_ID
@@ -12,8 +12,8 @@ export const authRoutes = new Hono<AuthEnv>()
 
 authRoutes.post("/demo", async (c) => {
   if (CANVAS_CLIENT_ID) return c.json({ error: "Demo mode disabled" }, 403)
-  const db = getDb()
-  const user = createDemoUser(db)
+  const sql = getSql()
+  const user = await createDemoUser(sql)
   const token = await signToken(user.id as number)
   setCookie(c, "access_token_cookie", token, { httpOnly: true, path: "/", sameSite: "Lax", maxAge: 60 * 60 * 24 * 7 })
   return c.json({ id: user.id, name: user.name, email: user.email })
@@ -42,25 +42,23 @@ authRoutes.get("/callback", async (c) => {
     }),
   })
   if (!tokenRes.ok) return c.json({ error: "Token exchange failed" }, 502)
-  const tokenData = await tokenRes.json() as { access_token: string; refresh_token?: string; user?: { id: number; name: string } }
+  const tokenData = await tokenRes.json() as { access_token: string; refresh_token?: string }
 
-  // Fetch user profile
   const profileRes = await fetch(`${CANVAS_BASE_URL}/api/v1/users/self/profile`, {
     headers: { Authorization: `Bearer ${tokenData.access_token}` },
   })
   const profile = await profileRes.json() as { id: number; name: string; primary_email?: string }
 
-  const db = getDb()
-  const { upsertUser } = await import("../db/queries.js")
-  const user = upsertUser(db, String(profile.id), profile.name, profile.primary_email ?? "", tokenData.access_token, tokenData.refresh_token)
+  const sql = getSql()
+  const user = await upsertUser(sql, String(profile.id), profile.name, profile.primary_email ?? "", tokenData.access_token, tokenData.refresh_token)
   const token = await signToken(user.id as number)
   setCookie(c, "access_token_cookie", token, { httpOnly: true, path: "/", sameSite: "Lax", maxAge: 60 * 60 * 24 * 7 })
   return c.redirect("/")
 })
 
-authRoutes.get("/me", jwtRequired, (c) => {
-  const db = getDb()
-  const user = getUser(db, c.get("userId"))
+authRoutes.get("/me", jwtRequired, async (c) => {
+  const sql = getSql()
+  const user = await getUser(sql, c.get("userId"))
   if (!user) return c.json({ error: "Not found" }, 404)
   return c.json({ id: user.id, name: user.name, email: user.email })
 })

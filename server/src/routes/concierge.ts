@@ -1,11 +1,5 @@
-/**
- * Concierge — responds to sme_anchor log entries with margin notes.
- * Same logic as Flask's /api/concierge/<assignment_id>.
- * alkahest-ts is a direct import here — no subprocess bridge needed.
- */
-
 import { Hono } from "hono"
-import { getDb } from "../db/index.js"
+import { getSql } from "../db/index.js"
 import * as q from "../db/queries.js"
 import { jwtRequired, type AuthEnv } from "../auth.js"
 import { callAi } from "../ai/index.js"
@@ -15,50 +9,50 @@ export const conciergeRoutes = new Hono<AuthEnv>()
 conciergeRoutes.use("*", jwtRequired)
 
 conciergeRoutes.post("/:assignmentId", async (c) => {
-  const db = getDb()
+  const sql = getSql()
   const userId = c.get("userId")
   const assignmentId = c.req.param("assignmentId")
 
-  const assignment = q.getAssignment(db, assignmentId, userId)
+  const assignment = await q.getAssignment(sql, assignmentId, userId)
   if (!assignment) return c.json({ error: "Not found" }, 404)
 
   const body = await c.req.json()
   const { anchor_id, comment_id, endpoint, api_key, model } = body
   if (!anchor_id || !comment_id) return c.json({ error: "anchor_id and comment_id required" }, 400)
 
-  const anchor = q.getLogEntry(db, Number(anchor_id))
+  const anchor = await q.getLogEntry(sql, Number(anchor_id))
   if (!anchor) return c.json({ error: "Anchor not found" }, 404)
 
   let anchorContent: Record<string, unknown> = {}
   try { anchorContent = JSON.parse(anchor.content as string) } catch {}
 
-  // Gather context
-  const snapshot = q.latestSnapshot(db, assignmentId)
+  const snapshot = await q.latestSnapshot(sql, assignmentId)
   let draftHtml = ""
   if (snapshot) {
-    const content = typeof snapshot.content === "string" ? JSON.parse(snapshot.content) : snapshot.content
-    draftHtml = (content as Record<string, unknown>).description as string ?? ""
+    const content = snapshot.content as Record<string, unknown>
+    draftHtml = (content.description as string) ?? ""
   }
 
-  const course = q.getCourse(db, assignment.course_id as number, userId)
+  const course = await q.getCourse(sql, assignment.courseId as number, userId)
   let courseData: Record<string, unknown> | undefined
   if (course) {
-    const outcomes = q.listLearningOutcomes(db, course.id as number)
-    const bearings = q.listBearings(db, course.id as number)
-    const statements = bearings.flatMap(b => q.listStatements(db, b.id as number))
+    const [outcomes, bearings] = await Promise.all([
+      q.listLearningOutcomes(sql, course.id as number),
+      q.listBearings(sql, course.id as number),
+    ])
+    const statements = (await Promise.all(bearings.map((b: Record<string, unknown>) => q.listStatements(sql, b.id as number)))).flat()
     courseData = {
       ...course,
       learning_outcome_rows: outcomes,
-      bearings: bearings.map(b => ({
+      bearings: bearings.map((b: Record<string, unknown>) => ({
         ...b,
-        statements: statements.filter(s => s.bearing_id === b.id),
+        statements: statements.filter((s: Record<string, unknown>) => s.bearingId === b.id),
       })),
     }
   }
 
-  const selectionText = anchorContent.text as string ?? ""
   const hasSelection = anchorContent.from != null && anchorContent.to != null
-
+  const selectionText = anchorContent.text as string ?? ""
   const userMsg = hasSelection
     ? `The SME selected this passage and asked for help:\n\n"${selectionText}"\n\nFull draft:\n${draftHtml}`
     : `The SME asked for help with the whole draft:\n\n${draftHtml}`
@@ -80,8 +74,8 @@ conciergeRoutes.post("/:assignmentId", async (c) => {
     return c.json({ error: String(e) }, 500)
   }
 
-  const note = q.appendLog(
-    db, userId, "assignment", assignmentId,
+  const note = await q.appendLog(
+    sql, userId, "assignment", assignmentId,
     "agent_note",
     JSON.stringify({ comment_id, text: responseText, source: "agent" }),
     Number(anchor_id),

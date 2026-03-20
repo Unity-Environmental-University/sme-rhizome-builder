@@ -12,14 +12,13 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "alkahest-ts": "file:../../alkahest-ts",
-    "better-sqlite3": "^11.7.0",
     "hono": "^4.7.4",
     "jose": "^5.10.0",
     "openai": "^4.87.3",
+    "postgres": "^3.4.8",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.14",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.19.3",
