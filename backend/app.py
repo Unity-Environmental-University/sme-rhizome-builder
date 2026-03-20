@@ -40,7 +40,6 @@ Environment:
 
 import json
 import os
-import re
 
 from datetime import datetime, timedelta, timezone
 
@@ -174,27 +173,6 @@ def _course_context_for_prompt(conn, course) -> dict:
         "learning_outcome_rows": [{"id": lo["id"], "text": lo["text"], "position": lo["position"]} for lo in outcome_rows],
         "bearings": bearing_dicts,
     }
-
-
-# ── Extract assignment from model response ────────────────────────────────────
-
-def _extract_assignment(text: str):
-    """Pull <assignment>...</assignment> JSON from model response, if present.
-
-    Returns (assignment_dict_or_None, clean_text).
-    If JSON is malformed, logs the error and returns (None, original_text) —
-    the conversation survives even if crystallization fails.
-    """
-    match = re.search(r"<assignment>(.*?)</assignment>", text, re.DOTALL)
-    if not match:
-        return None, text
-    raw = match.group(1).strip()
-    clean = re.sub(r"<assignment>.*?</assignment>", "", text, flags=re.DOTALL).strip()
-    try:
-        return json.loads(raw), clean
-    except json.JSONDecodeError as e:
-        app.logger.error("Failed to parse assignment JSON: %s\nRaw: %.200s", e, raw)
-        return None, text
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -621,93 +599,6 @@ def concierge(assignment_id: str):
 
     return jsonify(dict(note)), 201
 
-
-# ── Chat endpoint ─────────────────────────────────────────────────────────────
-
-@app.post("/api/chat")
-@jwt_required()
-def chat():
-    """Conversation turn.
-
-    Persists messages to a context (context_type + context_id).
-    context_type: 'assignment' | 'course' | 'thread'
-    context_id:   id of that thing
-
-    If course_id is provided, builds the system prompt from course context.
-    If an assignment crystallizes, saves it to the course.
-    """
-    conn = get_db()
-    user_id = int(get_jwt_identity())
-    body = request.get_json(force=True)
-
-    messages = body.get("messages", [])
-    if not messages:
-        return jsonify({"error": "no messages"}), 400
-
-    context_type = body.get("context_type")
-    context_id = str(body.get("context_id", ""))
-
-    api_key = body.get("api_key") or os.environ.get("ANTHROPIC_API_KEY")
-    endpoint = body.get("endpoint", "anthropic")
-    base_url = body.get("base_url") or None
-    model_override = body.get("model") or None
-
-    if not api_key and endpoint != "ollama":
-        return jsonify({"error": "No API key — set one in Settings (⚙) or via ANTHROPIC_API_KEY env"}), 503
-
-    # Build system prompt from course context if available
-    course_id = body.get("course_id")
-    course_data = None
-    if course_id:
-        course = q.get_course(conn, int(course_id), user_id)
-        if course:
-            course_data = _course_context_for_prompt(conn, course)
-
-    system_prompt = build_system_prompt(course_data)
-
-    anthropic_messages = [
-        {"role": m["role"], "content": m["content"]}
-        for m in messages
-    ]
-
-    try:
-        full_text = call_ai(
-            endpoint=endpoint,
-            system_prompt=system_prompt,
-            messages=anthropic_messages,
-            api_key=api_key,
-            base_url=base_url,
-            model=model_override,
-        )
-    except Exception as e:
-        app.logger.error("AI API error (%s): %s", endpoint, e, exc_info=True)
-        return jsonify({"error": str(e)}), 500
-
-    assignment_data, reply = _extract_assignment(full_text)
-
-    # Persist to log if we have a context
-    if context_type and context_id:
-        user_msg_content = messages[-1]["content"] if messages[-1]["role"] == "user" else None
-        user_entry = None
-        if user_msg_content:
-            user_entry = q.append_log(conn, user_id, context_type, context_id, "ai_turn", user_msg_content)
-        q.append_log(conn, user_id, context_type, context_id, "ai_turn", reply,
-                     replied_to=user_entry["id"] if user_entry else None)
-
-    # Crystallized assignment — create identity record + initial snapshot
-    if assignment_data and course_id:
-        course = q.get_course(conn, int(course_id), user_id)
-        if course:
-            module_label = assignment_data.get("module", "")
-            title = assignment_data.get("title", "Untitled")
-            position = q.next_position_in_module(conn, course["id"], user_id, module_label)
-            a = q.create_assignment(conn, user_id, course["id"], module_label, title, position)
-            q.append_log(conn, user_id, "assignment", a["id"], "created", title)
-            content = {"format_version": "1", **assignment_data}
-            q.create_snapshot(conn, a["id"], user_id, content, label="crystallized")
-            assignment_data["id"] = a["id"]
-
-    return jsonify({"reply": reply, "assignment": assignment_data})
 
 
 if __name__ == "__main__":

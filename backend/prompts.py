@@ -71,58 +71,6 @@ When they give you the pedagogical answer, ask what's underneath it.
 Follow their knowledge first. Connect it to the course outcomes after.
     """.strip(),
 
-    "crystallization_signal": """
-The assignment is ready to crystallize when the SME says something that surprises them —
-when they name something that doesn't have a clean word for it yet,
-when the tacit becomes explicit in a way they couldn't have planned.
-That is the signal. Wait for it. Press toward it. Receive it when it comes.
-
-When crystallization happens, generate the assignment draft. Not before.
-    """.strip(),
-
-    "rubric_conventions": """
-Rubric conventions at Unity:
-- Ratings-based criteria with four levels: Excellent, Proficient, Developing, Beginning.
-- Total points are almost always 100.
-- Always include a Citations criterion (typically 10–15 points):
-  "Integrates relevant sources using in-text citations with full citations in the reference section,
-  if applicable."
-- Name criteria in the language of the discipline. The rubric should feel like it came from
-  someone who knows this field, not from a textbook on assessment design.
-    """.strip(),
-
-    "output_format": """
-The assignment draft belongs in the response as JSON inside <assignment>...</assignment> tags.
-
-Assignment JSON shape:
-{
-  "module": "string (optional — week or module label if mentioned)",
-  "title": "string",
-  "description": "string (markdown ok — student-facing prompt)",
-  "learning_outcomes": ["string — what students demonstrate by completing this"],
-  "aligned_outcomes": ["string — from course outcomes, verbatim or close paraphrase"],
-  "points_possible": 100,
-  "submission_types": ["online_text_entry" | "online_upload" | "online_url"],
-  "rubric": [
-    {
-      "criterion": "string (short label in the discipline's language)",
-      "long_description": "string (what this criterion is actually assessing)",
-      "points": number,
-      "ratings": [
-        {"description": "Excellent", "points": number},
-        {"description": "Proficient", "points": number},
-        {"description": "Developing", "points": number},
-        {"description": "Beginning", "points": number}
-      ]
-    }
-  ]
-}
-
-Respond conversationally. The assignment block appears only when something real has surfaced.
-The assignment should feel like it belongs to this discipline and to this person.
-If it could have come from a template, it isn't ready yet.
-    """.strip(),
-
     "margin_note": """
 Someone wrote this. They're turning what they know into something students can do.
 Some of it is already alive — you'll feel it, the places where the language gets
@@ -158,15 +106,6 @@ follow their thread, not the bearing. The bearing tells you the thread matters.
     """.strip(),
 
 }
-
-DEFAULT_DECK: list[str] = [
-    "posture",
-    "institution",
-    "practices",
-    "crystallization_signal",
-    "rubric_conventions",
-    "output_format",
-]
 
 
 # ── Build ──────────────────────────────────────────────────────────────────────
@@ -228,7 +167,7 @@ def _render_bearings_section(course: dict) -> str | None:
 
 def build_system_prompt(
     course: dict | None = None,
-    deck: list[str] = DEFAULT_DECK,
+    deck: list[str] = CONCIERGE_DECK,
 ) -> str:
     parts = [CARDS[card] for card in deck if card != "bearings"]
 
