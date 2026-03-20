@@ -16,6 +16,7 @@ import { courseRoutes } from "./routes/courses.js"
 import { assignmentRoutes } from "./routes/assignments.js"
 import { logRoutes } from "./routes/log.js"
 import { conciergeRoutes } from "./routes/concierge.js"
+import { moduleRoutes } from "./routes/modules.js"
 import { bearingRoutes } from "./routes/bearings.js"
 
 const PORT = Number(process.env.HONO_PORT ?? 5051)
@@ -34,6 +35,7 @@ app.route("/api/courses", courseRoutes)
 app.route("/api/assignments", assignmentRoutes)
 app.route("/api/log", logRoutes)
 app.route("/api/concierge", conciergeRoutes)
+app.route("/api/modules", moduleRoutes)
 app.route("/api/bearings", bearingRoutes)
 
 app.get("/", (c) => c.json({ service: "sme-rhizome-server", port: PORT, backend: "hono" }))

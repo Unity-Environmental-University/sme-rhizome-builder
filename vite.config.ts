@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [svelte()],
   server: {
     proxy: {
-      '/api': 'http://localhost:5050'
+      '/api': 'http://localhost:5051'
     }
   }
 });
