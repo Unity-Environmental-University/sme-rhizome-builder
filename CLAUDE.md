@@ -96,6 +96,9 @@ The assignment is the artifact. The conversation is how it gets made.
 npm install
 pip install -r backend/requirements.txt
 npm run dev:full           # Vite (:5173) + Flask (:5050)
+
+# Hono backend (parallel, proto/hono-backend branch)
+cd server && npm install && npm run dev   # Hono (:5051) — same DB, alkahest-ts native
 ```
 
 Admin dashboard (localhost only): `http://localhost:5050/admin` — set API keys, Canvas credentials.
