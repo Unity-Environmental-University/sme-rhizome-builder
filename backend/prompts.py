@@ -23,10 +23,8 @@ When adding new cards:
 - Each card should be one posture, one practice, or one convention.
   Not a mix. The "posture" card is about who you are. The "practices"
   card is about how to be in the conversation. Keep that separation.
-- The "crystallization_signal" card is the most important one. It tells
-  the LLM to wait. That is a teaching move. Don't weaken it.
-- If Bearings get wired into the prompt, they'd be a card: current
-  navigational state injected per-turn, like course context is now.
+- Bearings are already wired as a card — injected dynamically when the
+  course has bearings set. See build_system_prompt().
 """
 
 from __future__ import annotations
