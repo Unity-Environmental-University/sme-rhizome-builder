@@ -10,6 +10,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
+import { snakeCaseResponse } from "./middleware/snakeCase.js"
 import { authRoutes } from "./routes/auth.js"
 import { courseRoutes } from "./routes/courses.js"
 import { assignmentRoutes } from "./routes/assignments.js"
@@ -22,6 +23,7 @@ const PORT = Number(process.env.HONO_PORT ?? 5051)
 const app = new Hono()
 
 app.use("*", logger())
+app.use("*", snakeCaseResponse)
 app.use("*", cors({
   origin: ["http://localhost:5173", "http://localhost:5174"],
   credentials: true,
