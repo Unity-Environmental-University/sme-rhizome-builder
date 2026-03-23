@@ -9,7 +9,7 @@ courseRoutes.use("*", jwtRequired)
 courseRoutes.get("/", async (c) => {
   const sql = getSql()
   const courses = await q.listCourses(sql, c.get("userId"))
-  return c.json(courses)
+  return c.json({ courses })
 })
 
 courseRoutes.post("/", async (c) => {

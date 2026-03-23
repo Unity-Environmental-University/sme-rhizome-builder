@@ -11,7 +11,8 @@ assignmentRoutes.get("/", async (c) => {
   const userId = c.get("userId")
   const courseId = Number(c.req.query("course_id"))
   if (!courseId) return c.json({ error: "course_id required" }, 400)
-  return c.json(await q.listAssignments(sql, courseId, userId))
+  const assignments = await q.listAssignments(sql, courseId, userId)
+  return c.json({ assignments })
 })
 
 assignmentRoutes.post("/", async (c) => {
