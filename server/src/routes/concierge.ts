@@ -83,6 +83,7 @@ conciergeRoutes.post("/:assignmentId", async (c) => {
   )
 
   // Fire bearing eval without blocking — writes observed + rolls up likelihood
+  // Then log the pulse so the thread sidebar can show the reading
   if (courseData?.bearings && draftHtml) {
     type BearingWithStatements = { id: number; text: string; weight: number; likelihood: number; statements: { id: number; text: string; observed: boolean | null }[] }
     const bearings = (courseData.bearings as BearingWithStatements[]).filter(b => b.statements.length > 0)
@@ -94,6 +95,13 @@ conciergeRoutes.post("/:assignmentId", async (c) => {
         endpoint: resolvedEndpoint,
         apiKey: api_key ?? process.env.ANTHROPIC_API_KEY,
         model,
+      }).then(async (pulse) => {
+        await q.appendLog(
+          sql, userId, "assignment", assignmentId,
+          "bearing_pulse",
+          JSON.stringify({ comment_id, pulse, source: "system" }),
+          Number(anchor_id),
+        )
       }).catch(e => console.error("[concierge] bearingEval failed:", e))
     }
   }

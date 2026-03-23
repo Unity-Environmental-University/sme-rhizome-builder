@@ -3,6 +3,12 @@
   import axios from 'axios';
   import { activeThreadId, activeAssignmentId, sidebarOpen, logVersion } from '../stores/threads';
 
+  type PulseReading = {
+    text: string;
+    likelihood: number;
+    statements: { text: string; observed: boolean | null }[];
+  };
+
   type LogEntry = {
     id: number;
     user_id: number;
@@ -13,7 +19,7 @@
     replied_to: number | null;
     created_at: string;
     // parsed from content JSON
-    _parsed?: { comment_id?: string; text?: string; source?: string };
+    _parsed?: { comment_id?: string; text?: string; source?: string; pulse?: PulseReading[] };
   };
 
   let entries: LogEntry[] = [];
@@ -109,11 +115,16 @@
   });
 
   function sourceBadge(entry: LogEntry): string {
+    if (entry.action_type === 'bearing_pulse') return 'bearing';
     return entry._parsed?.source ?? (entry.action_type === 'agent_note' ? 'agent' : 'sme');
   }
 
   function entryText(entry: LogEntry): string {
     return entry._parsed?.text ?? entry.content;
+  }
+
+  function getPulse(entry: LogEntry): PulseReading[] {
+    return (entry._parsed?.pulse ?? []) as PulseReading[];
   }
 
   function formatTime(iso: string): string {
@@ -137,7 +148,21 @@
         {#each thread as entry (entry.id)}
           <li class="thread-sidebar__entry" data-source={sourceBadge(entry)}>
             <span class="thread-sidebar__source" data-source={sourceBadge(entry)}>{sourceBadge(entry)}</span>
-            <p class="thread-sidebar__text">{entryText(entry)}</p>
+            {#if entry.action_type === 'bearing_pulse' && entry._parsed?.pulse}
+              <div class="thread-sidebar__pulse">
+                {#each getPulse(entry) as reading}
+                  <div class="pulse__bearing">
+                    <span class="pulse__likelihood" class:pulse--go={reading.likelihood >= 0.6} class:pulse--nogo={reading.likelihood < 0.4}>{(reading.likelihood * 100).toFixed(0)}%</span>
+                    <span class="pulse__text">{reading.text}</span>
+                  </div>
+                  {#each reading.statements as stmt}
+                    <span class="pulse__stmt" class:pulse__stmt--confirmed={stmt.observed === true} class:pulse__stmt--disconfirmed={stmt.observed === false} class:pulse__stmt--unaddressed={stmt.observed === null}>{stmt.text}</span>
+                  {/each}
+                {/each}
+              </div>
+            {:else}
+              <p class="thread-sidebar__text">{entryText(entry)}</p>
+            {/if}
             <time class="thread-sidebar__time" datetime={entry.created_at}>{formatTime(entry.created_at)}</time>
           </li>
         {/each}
@@ -259,6 +284,46 @@
     color: $una-mid-green;
     opacity: 0.7;
   }
+
+  .thread-sidebar__pulse {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pulse__bearing {
+    display: flex;
+    align-items: baseline;
+    gap: $space-xs;
+  }
+
+  .pulse__likelihood {
+    font-family: $font-mono;
+    font-size: 0.75rem;
+    font-weight: 600;
+    min-width: 2.5em;
+  }
+
+  .pulse--go { color: $una-mid-green; }
+  .pulse--nogo { color: #b35540; }
+
+  .pulse__text {
+    font-size: 0.78rem;
+    color: $color-text;
+  }
+
+  .pulse__stmt {
+    font-size: 0.7rem;
+    padding-left: 2.5em;
+    line-height: 1.4;
+  }
+
+  .pulse__stmt--confirmed { color: $una-mid-green; }
+  .pulse__stmt--confirmed::before { content: "\2713\00a0"; }
+  .pulse__stmt--disconfirmed { color: #b35540; }
+  .pulse__stmt--disconfirmed::before { content: "\2717\00a0"; }
+  .pulse__stmt--unaddressed { color: $una-mid-green; opacity: 0.5; }
+  .pulse__stmt--unaddressed::before { content: "\2014\00a0"; }
 
   .thread-sidebar__footer {
     border-top: 1px solid $color-border;
