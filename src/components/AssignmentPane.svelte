@@ -28,7 +28,7 @@
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const dispatch = createEventDispatcher<{
-    saved: { id: string; title: string; module_label: string };
+    saved: { id: string; title: string; moduleLabel: string };
     back: void;
   }>();
 
@@ -112,7 +112,7 @@
         assignmentId = res.data.id;
         activeAssignmentId.set(assignmentId);
         saveStatus = 'saved';
-        dispatch('saved', { id: assignmentId!, title: title.trim() || 'Untitled', module_label: moduleLabel });
+        dispatch('saved', { id: assignmentId!, title: title.trim() || 'Untitled', moduleLabel });
         setTimeout(() => { if (saveStatus === 'saved') saveStatus = 'idle'; }, 2000);
       } catch (e) {
         saveStatus = 'error';
@@ -137,7 +137,7 @@
           label: 'draft',
         }, { withCredentials: true });
         saveStatus = 'saved';
-        dispatch('saved', { id: assignmentId, title: t, module_label: moduleLabel });
+        dispatch('saved', { id: assignmentId, title: t, moduleLabel });
         setTimeout(() => { if (saveStatus === 'saved') saveStatus = 'idle'; }, 2000);
       } catch (e) {
         saveStatus = 'error';

@@ -9,7 +9,7 @@
   type AssignmentStub = {
     id: string;
     title: string;
-    module_label: string;
+    moduleLabel: string;
     position: number | null;
     snapshot: AssignmentSnapshot | null;
   };

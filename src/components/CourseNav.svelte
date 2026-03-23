@@ -4,7 +4,7 @@
   import { createEventDispatcher } from 'svelte';
 
   type OutcomeRow = { id: number; text: string; position: number };
-  type AssignmentStub = { id: string; title: string; module_label: string; position: number | null; snapshot: unknown };
+  type AssignmentStub = { id: string; title: string; moduleLabel: string; position: number | null; snapshot: unknown };
   type ModuleShape = {
     id: number;
     week: number;

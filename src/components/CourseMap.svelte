@@ -12,7 +12,7 @@
 
   type OutcomeRow = { id: number; text: string; position: number };
   type AssignmentSnapshot = { id: number; label: string | null; description: string };
-  type AssignmentStub = { id: string; title: string; module_label: string; position: number | null; snapshot: AssignmentSnapshot | null };
+  type AssignmentStub = { id: string; title: string; moduleLabel: string; position: number | null; snapshot: AssignmentSnapshot | null };
   type CourseShape = {
     id: number;
     code: string;
@@ -78,7 +78,7 @@
         title: m.title,
         description: m.description,
         outcomeIds: m.outcomeIds ?? [],
-        assignments: saved.filter(a => a.module_label === `${pt} ${m.position + 1}`),
+        assignments: saved.filter(a => a.moduleLabel === `${pt} ${m.position + 1}`),
       }));
     } catch (e) {
       fetchError = 'Could not load course data.';
@@ -128,16 +128,16 @@
     view = { kind: 'editor', week, assignmentId: '', isNew: true };
   }
 
-  function handleEditorSaved(event: CustomEvent<{ id: string; title: string; module_label: string }>) {
-    const { id, title, module_label } = event.detail;
+  function handleEditorSaved(event: CustomEvent<{ id: string; title: string; moduleLabel: string }>) {
+    const { id, title, moduleLabel } = event.detail;
     modules = modules.map(m => {
       const ml = `${course!.periodType} ${m.week}`;
-      if (ml !== module_label) return m;
+      if (ml !== moduleLabel) return m;
       const exists = m.assignments.some(a => a.id === id);
       if (exists) {
         return { ...m, assignments: m.assignments.map(a => a.id === id ? { ...a, title } : a) };
       }
-      return { ...m, assignments: [...m.assignments, { id, title, module_label, position: null, snapshot: null }] };
+      return { ...m, assignments: [...m.assignments, { id, title, moduleLabel, position: null, snapshot: null }] };
     });
     // Update the view to use the real ID if this was a new assignment
     if (view.kind === 'editor' && !view.assignmentId) {

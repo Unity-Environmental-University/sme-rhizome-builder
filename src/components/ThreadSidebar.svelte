@@ -11,13 +11,13 @@
 
   type LogEntry = {
     id: number;
-    user_id: number;
-    context_type: string;
-    context_id: string;
-    action_type: string;
+    userId: number;
+    contextType: string;
+    contextId: string;
+    actionType: string;
     content: string;
-    replied_to: number | null;
-    created_at: string;
+    repliedTo: number | null;
+    createdAt: string;
     // parsed from content JSON
     _parsed?: { comment_id?: string; text?: string; source?: string; pulse?: PulseReading[] };
   };
@@ -50,7 +50,7 @@
     if (!roots.length) return [];
     // replies: entries whose replied_to points to a root or another reply in this thread
     const rootIds = new Set(roots.map(e => e.id));
-    const replies = allEntries.filter(e => e.replied_to !== null && rootIds.has(e.replied_to));
+    const replies = allEntries.filter(e => e.repliedTo !== null && rootIds.has(e.repliedTo));
     return [...roots, ...replies].sort((a, b) => a.id - b.id);
   }
 
@@ -115,8 +115,8 @@
   });
 
   function sourceBadge(entry: LogEntry): string {
-    if (entry.action_type === 'bearing_pulse') return 'bearing';
-    return entry._parsed?.source ?? (entry.action_type === 'agent_note' ? 'agent' : 'sme');
+    if (entry.actionType === 'bearing_pulse') return 'bearing';
+    return entry._parsed?.source ?? (entry.actionType === 'agent_note' ? 'agent' : 'sme');
   }
 
   function entryText(entry: LogEntry): string {
@@ -148,7 +148,7 @@
         {#each thread as entry (entry.id)}
           <li class="thread-sidebar__entry" data-source={sourceBadge(entry)}>
             <span class="thread-sidebar__source" data-source={sourceBadge(entry)}>{sourceBadge(entry)}</span>
-            {#if entry.action_type === 'bearing_pulse' && entry._parsed?.pulse}
+            {#if entry.actionType === 'bearing_pulse' && entry._parsed?.pulse}
               <div class="thread-sidebar__pulse">
                 {#each getPulse(entry) as reading}
                   <div class="pulse__bearing">
@@ -163,7 +163,7 @@
             {:else}
               <p class="thread-sidebar__text">{entryText(entry)}</p>
             {/if}
-            <time class="thread-sidebar__time" datetime={entry.created_at}>{formatTime(entry.created_at)}</time>
+            <time class="thread-sidebar__time" datetime={entry.createdAt}>{formatTime(entry.createdAt)}</time>
           </li>
         {/each}
       </ul>

@@ -60,7 +60,7 @@ authRoutes.get("/me", jwtRequired, async (c) => {
   const sql = getSql()
   const user = await getUser(sql, c.get("userId"))
   if (!user) return c.json({ error: "Not found" }, 404)
-  return c.json({ id: user.id, name: user.name, email: user.email })
+  return c.json({ id: user.id, name: user.name, email: user.email, canvasBaseUrl: CANVAS_BASE_URL })
 })
 
 authRoutes.post("/logout", (c) => {

@@ -15,7 +15,7 @@ courseRoutes.get("/", async (c) => {
 courseRoutes.post("/", async (c) => {
   const sql = getSql()
   const body = await c.req.json()
-  const course = await q.createCourse(sql, c.get("userId"), body.course_code, body.course_title, body.learning_outcomes, body.canvas_course_id, body.period_type)
+  const course = await q.createCourse(sql, c.get("userId"), body.courseCode, body.courseTitle, body.learningOutcomes, body.canvasCourseId, body.periodType)
   return c.json(course, 201)
 })
 
@@ -45,7 +45,7 @@ courseRoutes.patch("/:courseId", async (c) => {
   const courseId = Number(c.req.param("courseId"))
   if (!await q.getCourse(sql, courseId, userId)) return c.json({ error: "Not found" }, 404)
   const body = await c.req.json()
-  const course = await q.updateCourse(sql, courseId, body.course_code, body.course_title, body.learning_outcomes, body.canvas_course_id)
+  const course = await q.updateCourse(sql, courseId, body.courseCode, body.courseTitle, body.learningOutcomes, body.canvasCourseId)
   return c.json(course)
 })
 
