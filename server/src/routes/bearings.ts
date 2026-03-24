@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { getSql } from "../db/index.js"
 import * as q from "../db/queries.js"
 import { jwtRequired, type AuthEnv } from "../auth.js"
-import { numParam, enrichBearings } from "../helpers.js"
+import { numParam, enrichBearings, bearingDelta } from "../helpers.js"
 
 export const bearingRoutes = new Hono<AuthEnv>()
 bearingRoutes.use("*", jwtRequired)
@@ -24,7 +24,7 @@ bearingRoutes.post("/", async (c) => {
   if (!course_id || !text) return c.json({ error: "course_id and text required" }, 400)
   if (!await q.getCourse(sql, course_id, userId)) return c.json({ error: "Not found" }, 404)
   const bearing = await q.createBearing(sql, course_id, text, weight, likelihood, learning_outcome_id)
-  return c.json({ ...bearing, delta: weight - likelihood, statements: [] }, 201)
+  return c.json({ ...bearing, delta: bearingDelta(weight, likelihood), statements: [] }, 201)
 })
 
 bearingRoutes.patch("/:bearingId", async (c) => {
@@ -35,7 +35,7 @@ bearingRoutes.patch("/:bearingId", async (c) => {
   const bearing = await q.updateBearing(sql, bearingId, body)
   if (!bearing) return c.json({ error: "Not found" }, 404)
   const statements = await q.listStatements(sql, bearingId)
-  return c.json({ ...bearing, delta: (bearing.weight as number) - (bearing.likelihood as number), statements })
+  return c.json({ ...bearing, delta: bearingDelta(bearing.weight as number, bearing.likelihood as number), statements })
 })
 
 bearingRoutes.delete("/:bearingId", async (c) => {

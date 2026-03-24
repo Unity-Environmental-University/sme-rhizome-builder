@@ -18,6 +18,11 @@ export function numParam(raw: string | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+/** Bearing delta: how far the read is from the designer's weight. */
+export function bearingDelta(weight: number, likelihood: number): number {
+  return weight - likelihood
+}
+
 /**
  * Fetch bearings for a course with their statements and delta attached.
  * Used in courses/:id GET, bearings GET, and concierge POST.
@@ -27,7 +32,7 @@ export async function enrichBearings(sql: Sql, courseId: number) {
   return Promise.all(
     bearings.map(async (b: Record<string, unknown>) => ({
       ...b,
-      delta: (b.weight as number) - (b.likelihood as number),
+      delta: bearingDelta(b.weight as number, b.likelihood as number),
       statements: await q.listStatements(sql, b.id as number),
     }))
   )
