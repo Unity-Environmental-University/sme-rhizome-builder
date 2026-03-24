@@ -31,14 +31,15 @@ You will receive numbered statements. For each, respond with exactly one word on
 
 One word per line, in order. No explanation.`
 
-function parseEval(raw: string): boolean | null {
+export function parseEval(raw: string): boolean | null {
   const s = raw.trim().toLowerCase()
-  if (s.startsWith("confirmed")) return true
-  if (s.startsWith("disconfirmed")) return false
+  if (s === "confirmed") return true
+  if (s === "disconfirmed") return false
+  if (s === "not_addressed") return null
   return null
 }
 
-function parseBatchEval(raw: string, count: number): (boolean | null)[] {
+export function parseBatchEval(raw: string, count: number): (boolean | null)[] {
   const lines = raw.trim().split(/\n/).map(l => l.trim()).filter(Boolean)
   const results: (boolean | null)[] = []
   for (let i = 0; i < count; i++) {
@@ -47,7 +48,7 @@ function parseBatchEval(raw: string, count: number): (boolean | null)[] {
   return results
 }
 
-function rollupLikelihood(statements: Statement[]): number | null {
+export function rollupLikelihood(statements: Statement[]): number | null {
   const evaluated = statements.filter(s => s.observed !== null)
   if (!evaluated.length) return null
   const confirmed = evaluated.filter(s => s.observed === true).length

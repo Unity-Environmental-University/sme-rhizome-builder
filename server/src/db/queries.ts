@@ -9,6 +9,31 @@ import { v4 as uuidv4 } from "uuid"
 
 type Sql = postgres.Sql
 
+// ── Dynamic SET builder ──────────────────────────────────────────────────────
+
+type FieldSpec = Record<string, unknown>
+
+/**
+ * Build a parameterized SET clause from a partial fields object.
+ * Returns null if no fields to set. Uses `"observed" in fields` style
+ * checks for fields where undefined vs missing matters.
+ */
+export function buildSetClause(
+  fields: FieldSpec,
+  extraSets: string[] = [],
+): { clause: string; vals: unknown[] } | null {
+  const sets: string[] = []
+  const vals: unknown[] = []
+  for (const [col, val] of Object.entries(fields)) {
+    if (val !== undefined) {
+      sets.push(`${col} = $${vals.push(val)}`)
+    }
+  }
+  if (!sets.length && !extraSets.length) return null
+  sets.push(...extraSets)
+  return { clause: sets.join(", "), vals }
+}
+
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 export async function getUser(sql: Sql, userId: number) {
@@ -158,17 +183,13 @@ export async function updateModule(
   courseId: number,
   fields: Partial<{ title: string; description: string; position: number; outcome_ids: number[]; canvas_module_id: string }>,
 ) {
-  const sets: string[] = []
-  const vals: unknown[] = []
-  if (fields.title !== undefined)            { sets.push("title = $" + (vals.push(fields.title)));            }
-  if (fields.description !== undefined)      { sets.push("description = $" + (vals.push(fields.description))); }
-  if (fields.position !== undefined)         { sets.push("position = $" + (vals.push(fields.position)));       }
-  if (fields.outcome_ids !== undefined)      { sets.push("outcome_ids = $" + (vals.push(JSON.stringify(fields.outcome_ids)))); }
-  if (fields.canvas_module_id !== undefined) { sets.push("canvas_module_id = $" + (vals.push(fields.canvas_module_id))); }
-  if (!sets.length) return getModule(sql, moduleId, courseId)
-  // Use unsafe for dynamic SET clause — values are still parameterized
+  const mapped: FieldSpec = { ...fields }
+  if (fields.outcome_ids !== undefined) mapped.outcome_ids = JSON.stringify(fields.outcome_ids)
+  const built = buildSetClause(mapped)
+  if (!built) return getModule(sql, moduleId, courseId)
+  const { clause, vals } = built
   const [row] = await sql.unsafe(
-    `UPDATE modules SET ${sets.join(", ")} WHERE id = $${vals.push(moduleId)} AND course_id = $${vals.push(courseId)} RETURNING *`,
+    `UPDATE modules SET ${clause} WHERE id = $${vals.push(moduleId)} AND course_id = $${vals.push(courseId)} RETURNING *`,
     vals as any[],
   )
   return row ?? null
@@ -216,14 +237,11 @@ export async function updateAssignment(
   userId: number,
   fields: Partial<{ title: string; module_label: string; position: number }>,
 ) {
-  const sets: string[] = []
-  const vals: unknown[] = []
-  if (fields.title !== undefined)        { sets.push("title = $" + vals.push(fields.title)); }
-  if (fields.module_label !== undefined) { sets.push("module_label = $" + vals.push(fields.module_label)); }
-  if (fields.position !== undefined)     { sets.push("position = $" + vals.push(fields.position)); }
-  if (!sets.length) return getAssignment(sql, assignmentId, userId)
+  const built = buildSetClause(fields)
+  if (!built) return getAssignment(sql, assignmentId, userId)
+  const { clause, vals } = built
   const [row] = await sql.unsafe(
-    `UPDATE assignments SET ${sets.join(", ")} WHERE id = $${vals.push(assignmentId)} AND user_id = $${vals.push(userId)} RETURNING *`,
+    `UPDATE assignments SET ${clause} WHERE id = $${vals.push(assignmentId)} AND user_id = $${vals.push(userId)} RETURNING *`,
     vals as any[],
   )
   return row ?? null
@@ -316,15 +334,11 @@ export async function updateBearing(
   bearingId: number,
   fields: Partial<{ text: string; weight: number; likelihood: number }>,
 ) {
-  const sets: string[] = []
-  const vals: unknown[] = []
-  if (fields.text !== undefined)       { sets.push("text = $" + vals.push(fields.text)); }
-  if (fields.weight !== undefined)     { sets.push("weight = $" + vals.push(fields.weight)); }
-  if (fields.likelihood !== undefined) { sets.push("likelihood = $" + vals.push(fields.likelihood)); }
-  if (!sets.length) return getBearing(sql, bearingId)
-  sets.push("updated_at = now()")
+  const built = buildSetClause(fields, ["updated_at = now()"])
+  if (!built) return getBearing(sql, bearingId)
+  const { clause, vals } = built
   const [row] = await sql.unsafe(
-    `UPDATE bearings SET ${sets.join(", ")} WHERE id = $${vals.push(bearingId)} RETURNING *`,
+    `UPDATE bearings SET ${clause} WHERE id = $${vals.push(bearingId)} RETURNING *`,
     vals as any[],
   )
   return row ?? null
@@ -354,13 +368,15 @@ export async function updateStatement(
   statementId: number,
   fields: Partial<{ text: string; observed: boolean | null }>,
 ) {
-  const sets: string[] = []
-  const vals: unknown[] = []
-  if (fields.text !== undefined)     { sets.push("text = $" + vals.push(fields.text)); }
-  if ("observed" in fields)          { sets.push("observed = $" + vals.push(fields.observed ?? null)); }
-  if (!sets.length) return getStatement(sql, statementId)
+  // "observed" uses `in` check because null is a valid value (distinct from missing)
+  const mapped: FieldSpec = {}
+  if (fields.text !== undefined) mapped.text = fields.text
+  if ("observed" in fields) mapped.observed = fields.observed ?? null
+  const built = buildSetClause(mapped)
+  if (!built) return getStatement(sql, statementId)
+  const { clause, vals } = built
   const [row] = await sql.unsafe(
-    `UPDATE bearing_statements SET ${sets.join(", ")} WHERE id = $${vals.push(statementId)} RETURNING *`,
+    `UPDATE bearing_statements SET ${clause} WHERE id = $${vals.push(statementId)} RETURNING *`,
     vals as any[],
   )
   return row ?? null

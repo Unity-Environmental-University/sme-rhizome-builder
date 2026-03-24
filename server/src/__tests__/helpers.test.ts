@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import fc from "fast-check"
-import { numParam } from "../helpers.js"
+import { numParam, bearingDelta } from "../helpers.js"
 
 describe("numParam", () => {
   it("always returns a positive finite number or null", () => {
@@ -59,6 +59,20 @@ describe("numParam", () => {
         (input) => {
           // should not throw, regardless of input
           numParam(input)
+        }
+      )
+    )
+  })
+})
+
+describe("bearingDelta", () => {
+  it("is weight minus likelihood", () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: -1, max: 1, noNaN: true }),
+        fc.double({ min: 0, max: 1, noNaN: true }),
+        (weight, likelihood) => {
+          expect(bearingDelta(weight, likelihood)).toBeCloseTo(weight - likelihood)
         }
       )
     )
