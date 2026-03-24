@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import axios from 'axios';
+import { api } from '../lib/api';
 
 export type CourseContext = {
   id: number | null;
@@ -46,7 +46,7 @@ courseContext.subscribe(value => {
 
 export async function loadCourses(): Promise<void> {
   try {
-    const res = await axios.get('/api/courses', { withCredentials: true });
+    const res = await api.get('/api/courses');
     const courses: CourseListItem[] = res.data.courses;
     courseList.set(courses);
     const current = get(courseContext);
@@ -69,17 +69,13 @@ export async function loadCourses(): Promise<void> {
 export async function saveCourse(): Promise<void> {
   const ctx = get(courseContext);
   try {
-    const res = await axios.post(
-      '/api/courses',
-      {
-        id: ctx.id,
-        courseCode: ctx.courseCode,
-        courseTitle: ctx.courseTitle,
-        learningOutcomes: ctx.learningOutcomes,
-        canvasCourseId: ctx.canvasCourseId || null,
-      },
-      { withCredentials: true }
-    );
+    const res = await api.post('/api/courses', {
+      id: ctx.id,
+      courseCode: ctx.courseCode,
+      courseTitle: ctx.courseTitle,
+      learningOutcomes: ctx.learningOutcomes,
+      canvasCourseId: ctx.canvasCourseId || null,
+    });
     const saved = res.data;
     courseContext.update(c => ({ ...c, id: saved.id }));
     await loadCourses();

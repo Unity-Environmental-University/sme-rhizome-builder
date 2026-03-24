@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import axios from 'axios';
+  import { api } from '../lib/api';
+  import type { OutcomeRow, AssignmentStub, CourseShape, ModuleShape, View } from '../lib/types';
   import CourseNav from './CourseNav.svelte';
   import CourseOverview from './CourseOverview.svelte';
   import ModuleView from './ModuleView.svelte';
@@ -10,32 +11,6 @@
   import DesignerView from './DesignerView.svelte';
   import { sidebarOpen } from '../stores/threads';
 
-  type OutcomeRow = { id: number; text: string; position: number };
-  type AssignmentSnapshot = { id: number; label: string | null; description: string };
-  type AssignmentStub = { id: string; title: string; moduleLabel: string; position: number | null; snapshot: AssignmentSnapshot | null };
-  type CourseShape = {
-    id: number;
-    code: string;
-    title: string;
-    description: string;
-    periodType: string;
-    outcomes: string[];
-    outcomeRows: OutcomeRow[];
-  };
-  type ModuleShape = {
-    id: number;
-    week: number;
-    title: string;
-    description: string;
-    outcomeIds: number[];
-    assignments: AssignmentStub[];
-  };
-  type View =
-    | { kind: 'course' }
-    | { kind: 'module'; week: number }
-    | { kind: 'editor'; week: number; assignmentId: string; isNew?: boolean }
-    | { kind: 'designer' };
-
   let course: CourseShape | null = null;
   let modules: ModuleShape[] = [];
   let loading = true;
@@ -43,7 +18,7 @@
 
   onMount(async () => {
     try {
-      const res = await axios.get('/api/courses', { withCredentials: true });
+      const res = await api.get('/api/courses');
       const courses = res.data.courses;
       if (!courses.length) {
         fetchError = 'No courses found.';
@@ -67,8 +42,8 @@
 
       const pt = course.periodType;
       const [modRes, asgRes] = await Promise.all([
-        axios.get(`/api/modules?course_id=${c.id}`, { withCredentials: true }),
-        axios.get(`/api/assignments?course_id=${c.id}`, { withCredentials: true }),
+        api.get(`/api/modules?course_id=${c.id}`),
+        api.get(`/api/assignments?course_id=${c.id}`),
       ]);
 
       const saved: AssignmentStub[] = asgRes.data.assignments ?? [];

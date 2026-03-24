@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import axios from 'axios';
+import { api } from '../lib/api';
 import { courseContext } from './courseContext';
 
 export type Message = {
@@ -95,14 +96,10 @@ courseContext.subscribe(ctx => {
 
 export async function loadSessionFromApi(courseId: number): Promise<void> {
   try {
-    const summaryRes = await axios.get(`/api/sessions/by-course/${courseId}`, {
-      withCredentials: true,
-    });
+    const summaryRes = await api.get(`/api/sessions/by-course/${courseId}`);
     const { id: sessionId } = summaryRes.data;
 
-    const fullRes = await axios.get(`/api/sessions/${sessionId}`, {
-      withCredentials: true,
-    });
+    const fullRes = await api.get(`/api/sessions/${sessionId}`);
     const { messages, assignments } = fullRes.data;
 
     session.update(s => ({

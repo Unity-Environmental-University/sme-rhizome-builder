@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import axios from 'axios';
+  import { api } from '../lib/api';
 
   type Statement = { id: number; text: string; observed: boolean | null };
   type Bearing = {
@@ -31,7 +31,7 @@
 
   async function loadBearings() {
     try {
-      const res = await axios.get(`/api/bearings?course_id=${course.id}`, { withCredentials: true });
+      const res = await api.get(`/api/bearings?course_id=${course.id}`);
       bearings = (res.data as Bearing[]).map(b => ({ ...b, _editing: false }));
     } catch (e) {
       error = 'Could not load bearings.';
@@ -44,12 +44,12 @@
     if (!newText.trim()) return;
     saving = true;
     try {
-      const res = await axios.post('/api/bearings', {
+      const res = await api.post('/api/bearings', {
         course_id: course.id,
         text: newText.trim(),
         weight: newWeight,
         likelihood: 0.5,
-      }, { withCredentials: true });
+      });
       bearings = [...bearings, { ...res.data, _editing: false }];
       newText = '';
       newWeight = 0.5;
@@ -59,22 +59,22 @@
   }
 
   async function updateBearing(b: Bearing) {
-    const res = await axios.patch(`/api/bearings/${b.id}`, {
+    const res = await api.patch(`/api/bearings/${b.id}`, {
       text: b.text,
       weight: b.weight,
       likelihood: b.likelihood,
-    }, { withCredentials: true });
+    });
     bearings = bearings.map(x => x.id === b.id ? { ...res.data, statements: b.statements, _editing: false } : x);
   }
 
   async function deleteBearing(id: number) {
-    await axios.delete(`/api/bearings/${id}`, { withCredentials: true });
+    await api.delete(`/api/bearings/${id}`);
     bearings = bearings.filter(b => b.id !== id);
   }
 
   async function addStatement(b: Bearing, text: string) {
     if (!text.trim()) return;
-    const res = await axios.post(`/api/bearings/${b.id}/statements`, { text: text.trim() }, { withCredentials: true });
+    const res = await api.post(`/api/bearings/${b.id}/statements`, { text: text.trim() });
     bearings = bearings.map(x =>
       x.id === b.id ? { ...x, statements: [...x.statements, res.data] } : x
     );

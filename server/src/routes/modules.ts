@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { getSql } from "../db/index.js"
 import * as q from "../db/queries.js"
 import { jwtRequired, type AuthEnv } from "../auth.js"
+import { numParam } from "../helpers.js"
 
 export const moduleRoutes = new Hono<AuthEnv>()
 moduleRoutes.use("*", jwtRequired)
@@ -9,7 +10,7 @@ moduleRoutes.use("*", jwtRequired)
 moduleRoutes.get("/", async (c) => {
   const sql = getSql()
   const userId = c.get("userId")
-  const courseId = Number(c.req.query("course_id"))
+  const courseId = numParam(c.req.query("course_id"))
   if (!courseId) return c.json({ error: "course_id required" }, 400)
   if (!await q.getCourse(sql, courseId, userId)) return c.json({ error: "not found" }, 404)
   const modules = await q.listModules(sql, courseId)
@@ -30,9 +31,10 @@ moduleRoutes.post("/", async (c) => {
 moduleRoutes.patch("/:moduleId", async (c) => {
   const sql = getSql()
   const userId = c.get("userId")
-  const moduleId = Number(c.req.param("moduleId"))
+  const moduleId = numParam(c.req.param("moduleId"))
+  if (!moduleId) return c.json({ error: "Invalid moduleId" }, 400)
   const body = await c.req.json()
-  const courseId = Number(body.course_id)
+  const courseId = numParam(body.course_id)
   if (!courseId) return c.json({ error: "course_id required" }, 400)
   if (!await q.getCourse(sql, courseId, userId)) return c.json({ error: "not found" }, 404)
   const module_ = await q.updateModule(sql, moduleId, courseId, body)

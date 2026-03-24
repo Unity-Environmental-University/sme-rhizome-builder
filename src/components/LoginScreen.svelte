@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import axios from 'axios';
+  import { api } from '../lib/api';
 
   let demoAvailable = false;
   let demoLoading = false;
@@ -11,15 +12,14 @@
     // We use a HEAD-like GET which will 404 (endpoint is POST-only) rather than 403.
     // Simplest: just try with a flag rather than firing the real endpoint.
     try {
-      await axios.get('/api/auth/me', { withCredentials: true });
+      await api.get('/api/auth/me');
       // already authed somehow — shouldn't be here, but reload
       window.location.reload();
     } catch {
       // not authed — show demo button only if CANVAS_CLIENT_ID isn't set
       // we detect that by probing the login redirect: if it 503s, no oauth
       try {
-        const res = await axios.get('/api/auth/login', {
-          withCredentials: true,
+        const res = await api.get('/api/auth/login', {
           maxRedirects: 0,
           validateStatus: s => s < 400,
         });
@@ -41,7 +41,7 @@
   async function demoLogin() {
     demoLoading = true;
     try {
-      await axios.post('/api/auth/demo', {}, { withCredentials: true });
+      await api.post('/api/auth/demo', {});
       window.location.reload();
     } catch (err) {
       demoLoading = false;

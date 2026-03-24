@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import axios from 'axios';
+  import { api } from '../lib/api';
   import { activeThreadId, activeAssignmentId, sidebarOpen, logVersion } from '../stores/threads';
 
   type PulseReading = {
@@ -31,7 +31,7 @@
   async function fetchLog(assignmentId: string) {
     fetchError = '';
     try {
-      const res = await axios.get(`/api/log/${assignmentId}`, { withCredentials: true });
+      const res = await api.get(`/api/log/${assignmentId}`);
       entries = (res.data.entries as LogEntry[]).map(e => {
         let _parsed: LogEntry['_parsed'] = {};
         try { _parsed = JSON.parse(e.content); } catch { _parsed = {}; }
@@ -90,11 +90,11 @@
     submitting = true;
     try {
       const root = thread[0];
-      await axios.post(`/api/log/${currentAssignmentId}`, {
+      await api.post(`/api/log/${currentAssignmentId}`, {
         action_type: 'comment',
         content: JSON.stringify({ comment_id: currentThreadId, text: replyText.trim(), source: 'sme' }),
         replied_to: root?.id ?? null,
-      }, { withCredentials: true });
+      });
       replyText = '';
       await fetchLog(currentAssignmentId);
     } catch (e) {

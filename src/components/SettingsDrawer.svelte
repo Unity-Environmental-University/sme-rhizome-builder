@@ -3,7 +3,7 @@
   import { resetSession } from '../stores/session';
   import { user, logout } from '../stores/auth';
   import { settings } from '../stores/settings';
-  import axios from 'axios';
+  import { api } from '../lib/api';
 
   type CanvasAssignment = { id: number; name: string; points_possible: number; html_url: string; has_rubric: boolean };
   let canvasAssignments: CanvasAssignment[] = [];
@@ -16,9 +16,8 @@
     canvasError = '';
     canvasAssignments = [];
     try {
-      const res = await axios.get('/api/canvas/assignments', {
+      const res = await api.get('/api/canvas/assignments', {
         params: { canvas_course_id: $courseContext.canvasCourseId },
-        withCredentials: true,
       });
       canvasAssignments = res.data.assignments;
     } catch (err: unknown) {

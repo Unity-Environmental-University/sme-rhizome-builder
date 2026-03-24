@@ -1,19 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { fade } from 'svelte/transition';
-  import axios from 'axios';
+  import { api } from '../lib/api';
+  import type { OutcomeRow, CourseShape } from '../lib/types';
   import AssignmentEditor from './AssignmentEditor.svelte';
   import { activeAssignmentId, sidebarOpen } from '../stores/threads';
-
-  type OutcomeRow = { id: number; text: string; position: number };
-  type CourseShape = {
-    id: number;
-    code: string;
-    title: string;
-    periodType: string;
-    outcomes: string[];
-    outcomeRows: OutcomeRow[];
-  };
 
   export let assignmentId: string | null = null; // null = new
   export let moduleLabel: string = '';
@@ -37,7 +28,7 @@
       activeAssignmentId.set(assignmentId);
       try {
         // Load latest snapshot
-        const res = await axios.get(`/api/assignments/${assignmentId}/snapshots`, { withCredentials: true });
+        const res = await api.get(`/api/assignments/${assignmentId}/snapshots`);
         const snapshots = res.data.snapshots ?? [];
         if (snapshots.length) {
           const latest = snapshots[snapshots.length - 1];
@@ -75,7 +66,7 @@
     saving = true;
     saveStatus = 'saving';
     try {
-      await axios.post(`/api/assignments/${assignmentId}/snapshots`, {
+      await api.post(`/api/assignments/${assignmentId}/snapshots`, {
         content: {
           format_version: '1',
           title: title.trim() || 'Untitled',
@@ -83,7 +74,7 @@
           aligned_outcome_ids: alignedOutcomes.map(o => o.id),
         },
         label: 'autosave',
-      }, { withCredentials: true });
+      });
       saveStatus = 'saved';
       setTimeout(() => { if (saveStatus === 'saved') saveStatus = 'idle'; }, 2000);
     } catch (e) {
@@ -102,13 +93,13 @@
       saving = true;
       saveStatus = 'saving';
       try {
-        const res = await axios.post('/api/assignments', {
+        const res = await api.post('/api/assignments', {
           course_id: course.id,
           title: title.trim() || 'Untitled',
           description: content,
           module_label: moduleLabel,
           aligned_outcome_ids: alignedOutcomes.map(o => o.id),
-        }, { withCredentials: true });
+        });
         assignmentId = res.data.id;
         activeAssignmentId.set(assignmentId);
         saveStatus = 'saved';
@@ -126,8 +117,8 @@
       saveStatus = 'saving';
       try {
         const t = title.trim() || 'Untitled';
-        await axios.patch(`/api/assignments/${assignmentId}`, { title: t }, { withCredentials: true });
-        await axios.post(`/api/assignments/${assignmentId}/snapshots`, {
+        await api.patch(`/api/assignments/${assignmentId}`, { title: t });
+        await api.post(`/api/assignments/${assignmentId}/snapshots`, {
           content: {
             format_version: '1',
             title: t,
@@ -135,7 +126,7 @@
             aligned_outcome_ids: alignedOutcomes.map(o => o.id),
           },
           label: 'draft',
-        }, { withCredentials: true });
+        });
         saveStatus = 'saved';
         dispatch('saved', { id: assignmentId, title: t, moduleLabel });
         setTimeout(() => { if (saveStatus === 'saved') saveStatus = 'idle'; }, 2000);

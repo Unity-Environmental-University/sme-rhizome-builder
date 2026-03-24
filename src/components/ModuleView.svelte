@@ -2,34 +2,8 @@
   import { fade, fly } from 'svelte/transition';
   import { quintOut } from 'svelte/easing';
   import { createEventDispatcher } from 'svelte';
-  import axios from 'axios';
-
-  type OutcomeRow = { id: number; text: string; position: number };
-  type AssignmentSnapshot = { id: number; label: string | null; description: string };
-  type AssignmentStub = {
-    id: string;
-    title: string;
-    moduleLabel: string;
-    position: number | null;
-    snapshot: AssignmentSnapshot | null;
-  };
-  type ModuleShape = {
-    id: number;
-    week: number;
-    title: string;
-    description: string;
-    outcomeIds: number[];
-    assignments: AssignmentStub[];
-  };
-  type CourseShape = {
-    id: number;
-    code: string;
-    title: string;
-    description: string;
-    periodType: string;
-    outcomes: string[];
-    outcomeRows: OutcomeRow[];
-  };
+  import { api } from '../lib/api';
+  import type { OutcomeRow, AssignmentStub, CourseShape, ModuleShape } from '../lib/types';
 
   export let activeModule: ModuleShape;
   export let activeOutcomes: OutcomeRow[];
@@ -51,7 +25,7 @@
 
     try {
       await Promise.all(list.map((a, i) =>
-        axios.patch(`/api/assignments/${a.id}`, { position: i }, { withCredentials: true })
+        api.patch(`/api/assignments/${a.id}`, { position: i })
       ));
     } catch (e) {
       console.error('[ModuleView] reorder failed:', e);

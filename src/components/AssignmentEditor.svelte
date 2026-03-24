@@ -3,7 +3,7 @@
   import { Editor } from '@tiptap/core';
   import StarterKit from '@tiptap/starter-kit';
   import Placeholder from '@tiptap/extension-placeholder';
-  import axios from 'axios';
+  import { api } from '../lib/api';
   import EditorCanvas from './EditorCanvas.svelte';
   import type { MarkData } from './EditorCanvas.svelte';
   import { CommentMark } from './CommentMark';
@@ -49,17 +49,17 @@
     };
 
     try {
-      const anchorRes = await axios.post(`/api/log/${assignmentId}`, payload, { withCredentials: true });
+      const anchorRes = await api.post(`/api/log/${assignmentId}`, payload);
       if (sel) {
         placeComment(commentId, sel.from, sel.to, 'sme');
       }
       openThread(commentId);
 
       // Ask the concierge to respond — fire and don't block the UI
-      axios.post(`/api/concierge/${assignmentId}`, {
+      api.post(`/api/concierge/${assignmentId}`, {
         anchor_id: anchorRes.data.id,
         comment_id: commentId,
-      }, { withCredentials: true }).then(() => {
+      }).then(() => {
         notifyLogChanged();
       }).catch(e => {
         console.error('[AssignmentEditor] concierge failed:', e);

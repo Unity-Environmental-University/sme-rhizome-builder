@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { getSql } from "../db/index.js"
 import * as q from "../db/queries.js"
 import { jwtRequired, type AuthEnv } from "../auth.js"
+import { numParam } from "../helpers.js"
 
 export const assignmentRoutes = new Hono<AuthEnv>()
 assignmentRoutes.use("*", jwtRequired)
@@ -9,7 +10,7 @@ assignmentRoutes.use("*", jwtRequired)
 assignmentRoutes.get("/", async (c) => {
   const sql = getSql()
   const userId = c.get("userId")
-  const courseId = Number(c.req.query("course_id"))
+  const courseId = numParam(c.req.query("course_id"))
   if (!courseId) return c.json({ error: "course_id required" }, 400)
   const assignments = await q.listAssignments(sql, courseId, userId)
   return c.json({ assignments })

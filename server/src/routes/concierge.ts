@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { getSql } from "../db/index.js"
 import * as q from "../db/queries.js"
 import { jwtRequired, type AuthEnv } from "../auth.js"
+import { enrichBearings } from "../helpers.js"
 import { callAi } from "../ai/index.js"
 import { buildSystemPrompt, CONCIERGE_DECK } from "../ai/prompts.js"
 import { runBearingEval } from "../ai/bearingEval.js"
@@ -37,18 +38,14 @@ conciergeRoutes.post("/:assignmentId", async (c) => {
   const course = await q.getCourse(sql, assignment.courseId as number, userId)
   let courseData: Record<string, unknown> | undefined
   if (course) {
-    const [outcomes, bearings] = await Promise.all([
+    const [outcomes, bearingList] = await Promise.all([
       q.listLearningOutcomes(sql, course.id as number),
-      q.listBearings(sql, course.id as number),
+      enrichBearings(sql, course.id as number),
     ])
-    const statements = (await Promise.all(bearings.map((b: Record<string, unknown>) => q.listStatements(sql, b.id as number)))).flat()
     courseData = {
       ...course,
       learning_outcome_rows: outcomes,
-      bearings: bearings.map((b: Record<string, unknown>) => ({
-        ...b,
-        statements: statements.filter((s: Record<string, unknown>) => s.bearingId === b.id),
-      })),
+      bearings: bearingList,
     }
   }
 
